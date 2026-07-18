@@ -7,6 +7,7 @@ import {
   type EventDraftRequest,
   type EventRecord,
 } from '../api/client';
+import { friendlyErrorMessage } from '../api/errors';
 
 type FormValues = {
   title: string;
@@ -34,9 +35,9 @@ export function EventFormPage() {
     isEditing ? 'loading' : 'ready',
   );
   const [saving, setSaving] = useState(false);
-  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(
-    null,
-  );
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<
+    string | null
+  >(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,11 +68,7 @@ export function EventFormPage() {
         }
 
         setLoadState('error');
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : 'We could not load this event.',
-        );
+        setError(friendlyErrorMessage(loadError, 'eventLoad'));
       });
 
     return () => {
@@ -122,11 +119,7 @@ export function EventFormPage() {
       setFileInputKey((key) => key + 1);
       setMessage('Saved. Cue the confetti.');
     } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : 'We could not save this event.',
-      );
+      setError(friendlyErrorMessage(saveError, 'eventSave'));
     } finally {
       setSaving(false);
     }
@@ -148,11 +141,7 @@ export function EventFormPage() {
       );
       setMessage('Attachment removed.');
     } catch (deleteError) {
-      setError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : 'We could not remove that attachment.',
-      );
+      setError(friendlyErrorMessage(deleteError, 'upload'));
     } finally {
       setDeletingAttachmentId(null);
     }
@@ -186,7 +175,9 @@ export function EventFormPage() {
             {managedEventId ? 'Edit event' : 'Create event'}
           </p>
           <h2 className="mt-2 text-4xl font-black leading-tight">
-            {managedEventId ? values.title || 'Untitled event' : 'Plan a gathering'}
+            {managedEventId
+              ? values.title || 'Untitled event'
+              : 'Plan a gathering'}
           </h2>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -218,10 +209,15 @@ export function EventFormPage() {
         </div>
       ) : null}
 
-      <form className="grid gap-6 xl:grid-cols-[1fr_0.75fr]" onSubmit={saveEvent}>
+      <form
+        className="grid gap-6 xl:grid-cols-[1fr_0.75fr]"
+        onSubmit={saveEvent}
+      >
         <div className="space-y-5 rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
           <label className="block">
-            <span className="text-sm font-black uppercase text-coral">Title</span>
+            <span className="text-sm font-black uppercase text-coral">
+              Title
+            </span>
             <input
               className="mt-2 min-h-12 w-full rounded-lg border-2 border-ink bg-paper px-4 py-2 text-lg font-black"
               maxLength={160}
@@ -301,7 +297,9 @@ export function EventFormPage() {
 
         <aside className="space-y-5">
           <section className="rounded-lg border-4 border-ink bg-paper p-5 shadow-sticker">
-            <p className="text-sm font-black uppercase text-teal">Cover image</p>
+            <p className="text-sm font-black uppercase text-teal">
+              Cover image
+            </p>
             <div className="mt-4 aspect-[4/3] overflow-hidden rounded-lg border-2 border-ink bg-mint">
               {event?.cover_image_object_key ? (
                 <div className="flex h-full items-center justify-center p-4 text-center font-black">

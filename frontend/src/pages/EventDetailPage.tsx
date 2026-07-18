@@ -12,6 +12,7 @@ import {
   type EventRecord,
   type InvitationEmailDelivery,
 } from '../api/client';
+import { friendlyErrorMessage } from '../api/errors';
 import { useAuth } from '../auth/useAuth';
 
 type EventDetailState =
@@ -46,9 +47,11 @@ type EventDetailState =
       error: string;
     };
 
-type InviteFeedback =
-  | { tone: 'success' | 'error'; message: string; deliveries: InvitationEmailDelivery[] }
-  | null;
+type InviteFeedback = {
+  tone: 'success' | 'error';
+  message: string;
+  deliveries: InvitationEmailDelivery[];
+} | null;
 
 type RsvpFeedback = { tone: 'success' | 'error'; message: string } | null;
 
@@ -110,8 +113,12 @@ export function EventDetailPage() {
           apiClient.event(currentEventId),
           apiClient.eventAttachments(currentEventId),
           apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
-          apiClient.eventComments(currentEventId).catch(() => ({ comments: [] })),
-          apiClient.eventActivity(currentEventId).catch(() => ({ activity: [] })),
+          apiClient
+            .eventComments(currentEventId)
+            .catch(() => ({ comments: [] })),
+          apiClient
+            .eventActivity(currentEventId)
+            .catch(() => ({ activity: [] })),
         ]);
 
         const attendees = await apiClient
@@ -126,7 +133,11 @@ export function EventDetailPage() {
         const attendee =
           currentUser === null
             ? null
-            : findCurrentAttendee(attendees, currentUser.sub, currentUser.email);
+            : findCurrentAttendee(
+                attendees,
+                currentUser.sub,
+                currentUser.email,
+              );
 
         if (attendee) {
           setRsvpChoice(toRsvpChoice(attendee));
@@ -158,10 +169,7 @@ export function EventDetailPage() {
           attendees: [],
           comments: [],
           dashboardEvent: null,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'We could not load this event.',
+          error: friendlyErrorMessage(error, 'eventLoad'),
         });
       }
     }
@@ -241,11 +249,7 @@ export function EventDetailPage() {
       anchor.target = '_blank';
       anchor.click();
     } catch (error) {
-      setDownloadError(
-        error instanceof Error
-          ? error.message
-          : 'We could not prepare that download.',
-      );
+      setDownloadError(friendlyErrorMessage(error, 'download'));
     } finally {
       setDownloadingId(null);
     }
@@ -309,10 +313,7 @@ export function EventDetailPage() {
     } catch (error) {
       setInviteFeedback({
         tone: 'error',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Those invites could not be sent.',
+        message: friendlyErrorMessage(error, 'invite'),
         deliveries: [],
       });
     } finally {
@@ -347,7 +348,9 @@ export function EventDetailPage() {
         current.status === 'ready'
           ? {
               ...current,
-              ...(activityResponse ? { activity: activityResponse.activity } : {}),
+              ...(activityResponse
+                ? { activity: activityResponse.activity }
+                : {}),
               attendees: attendeeResponse.attendees,
               dashboardEvent: current.dashboardEvent
                 ? {
@@ -370,8 +373,7 @@ export function EventDetailPage() {
     } catch (error) {
       setRsvpFeedback({
         tone: 'error',
-        message:
-          error instanceof Error ? error.message : 'We could not save that RSVP.',
+        message: friendlyErrorMessage(error, 'rsvp'),
       });
     } finally {
       setRsvpSaving(false);
@@ -394,7 +396,10 @@ export function EventDetailPage() {
     setCommentError(null);
 
     try {
-      const response = await apiClient.createEventComment(detail.event.id, body);
+      const response = await apiClient.createEventComment(
+        detail.event.id,
+        body,
+      );
       const activityResponse = await apiClient
         .eventActivity(detail.event.id)
         .catch(() => null);
@@ -402,7 +407,9 @@ export function EventDetailPage() {
         current.status === 'ready'
           ? {
               ...current,
-              ...(activityResponse ? { activity: activityResponse.activity } : {}),
+              ...(activityResponse
+                ? { activity: activityResponse.activity }
+                : {}),
               comments: [...current.comments, response.comment],
             }
           : current,
@@ -411,11 +418,7 @@ export function EventDetailPage() {
       setCelebratedCommentId(response.comment.id);
       window.setTimeout(() => setCelebratedCommentId(null), 1400);
     } catch (error) {
-      setCommentError(
-        error instanceof Error
-          ? error.message
-          : 'We could not post that comment.',
-      );
+      setCommentError(friendlyErrorMessage(error, 'comment'));
     } finally {
       setCommentSaving(false);
     }
@@ -538,9 +541,7 @@ export function EventDetailPage() {
                   key={attachment.id}
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-black">
-                      {attachment.filename}
-                    </p>
+                    <p className="truncate font-black">{attachment.filename}</p>
                     <p className="mt-1 text-sm text-slate-600">
                       {formatBytes(attachment.byte_size)}
                     </p>
@@ -875,7 +876,9 @@ function ActivityFeed({
         </div>
         <div className="rounded-lg border-2 border-ink bg-coral p-3 text-white">
           <p className="text-xs font-black uppercase text-white/80">Feed</p>
-          <p className="mt-1 font-black">{activity.length ? 'Live' : 'Quiet'}</p>
+          <p className="mt-1 font-black">
+            {activity.length ? 'Live' : 'Quiet'}
+          </p>
         </div>
       </div>
 
@@ -1221,7 +1224,10 @@ function parseInviteEmails(value: string) {
   return value
     .split(/[\s,;]+/)
     .map((email) => email.trim().toLowerCase())
-    .filter((email) => email.includes('@') && !email.startsWith('@') && !email.endsWith('@'))
+    .filter(
+      (email) =>
+        email.includes('@') && !email.startsWith('@') && !email.endsWith('@'),
+    )
     .filter((email) => {
       if (seen.has(email)) {
         return false;
@@ -1247,8 +1253,9 @@ function findCurrentAttendee(
 ) {
   return (
     attendees.find((attendee) => attendee.invitee_sub === userSub) ??
-    attendees.find((attendee) =>
-      attendee.invitee_email?.toLowerCase() === userEmail.toLowerCase()
+    attendees.find(
+      (attendee) =>
+        attendee.invitee_email?.toLowerCase() === userEmail.toLowerCase(),
     ) ??
     null
   );
@@ -1282,7 +1289,10 @@ function socialAttendeeList(attendees: EventAttendee[]) {
       return false;
     }
 
-    if (attendee.rsvp_response === 'yes' || attendee.rsvp_response === 'maybe') {
+    if (
+      attendee.rsvp_response === 'yes' ||
+      attendee.rsvp_response === 'maybe'
+    ) {
       return true;
     }
 

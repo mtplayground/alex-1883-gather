@@ -961,7 +961,7 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 
@@ -1023,7 +1023,7 @@ async fn ensure_can_read_event(
 
     Err(ApiError::forbidden(
         "event_forbidden",
-        "you do not have access to this event",
+        "That event is private to its organizer and guest list.",
     ))
 }
 
@@ -1034,7 +1034,7 @@ fn ensure_can_manage_event(user: &CurrentUser, event: &Event) -> ApiResult<()> {
 
     Err(ApiError::forbidden(
         "event_forbidden",
-        "only the organizer may edit or delete this event",
+        "Only the organizer can change that event.",
     ))
 }
 
@@ -1058,7 +1058,7 @@ fn ensure_can_remove_attachment(
 
     Err(ApiError::forbidden(
         "attachment_forbidden",
-        "only the organizer or uploader may remove this attachment",
+        "Only the organizer or uploader can remove that attachment.",
     ))
 }
 
@@ -1089,11 +1089,12 @@ struct EventCoverImageUpload {
 }
 
 async fn read_event_cover_image(multipart: &mut Multipart) -> ApiResult<EventCoverImageUpload> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| ApiError::bad_request("invalid_upload", "invalid multipart upload"))?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        ApiError::bad_request(
+            "invalid_upload",
+            "That upload did not come through cleanly.",
+        )
+    })? {
         let field_name = field.name().unwrap_or_default().to_string();
         if field_name != "cover_image" && field_name != "image" && field_name != "file" {
             continue;
@@ -1105,26 +1106,31 @@ async fn read_event_cover_image(multipart: &mut Multipart) -> ApiResult<EventCov
             .ok_or_else(|| {
                 ApiError::bad_request(
                     "unsupported_image_type",
-                    "event cover image must be a JPEG, PNG, WebP, or GIF image",
+                    "Pick a JPEG, PNG, WebP, or GIF for the cover image.",
                 )
             })?;
         let bytes = field
             .bytes()
             .await
-            .map_err(|_| ApiError::bad_request("invalid_upload", "invalid image upload"))?
+            .map_err(|_| {
+                ApiError::bad_request(
+                    "invalid_upload",
+                    "That image upload did not come through cleanly.",
+                )
+            })?
             .to_vec();
 
         if bytes.is_empty() {
             return Err(ApiError::bad_request(
                 "empty_upload",
-                "event cover image must not be empty",
+                "That cover image looks empty. Choose another file.",
             ));
         }
 
         if bytes.len() > EVENT_COVER_IMAGE_MAX_BYTES {
             return Err(ApiError::bad_request(
                 "upload_too_large",
-                "event cover image must be 8 MB or smaller",
+                "Keep the cover image at 8 MB or smaller.",
             ));
         }
 
@@ -1137,7 +1143,7 @@ async fn read_event_cover_image(multipart: &mut Multipart) -> ApiResult<EventCov
 
     Err(ApiError::bad_request(
         "missing_cover_image",
-        "multipart upload must include a cover image file",
+        "Add a cover image before uploading.",
     ))
 }
 
@@ -1161,11 +1167,12 @@ async fn read_event_attachment(
     event_id: &str,
     multipart: &mut Multipart,
 ) -> ApiResult<EventAttachmentUpload> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| ApiError::bad_request("invalid_upload", "invalid multipart upload"))?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        ApiError::bad_request(
+            "invalid_upload",
+            "That upload did not come through cleanly.",
+        )
+    })? {
         let field_name = field.name().unwrap_or_default().to_string();
         if field_name != "attachment" && field_name != "file" {
             continue;
@@ -1174,7 +1181,7 @@ async fn read_event_attachment(
         if field.content_type() != Some(PDF_CONTENT_TYPE) {
             return Err(ApiError::bad_request(
                 "unsupported_attachment_type",
-                "event attachment must be a PDF file",
+                "Attachments need to be PDF files.",
             ));
         }
 
@@ -1182,27 +1189,32 @@ async fn read_event_attachment(
         let bytes = field
             .bytes()
             .await
-            .map_err(|_| ApiError::bad_request("invalid_upload", "invalid PDF upload"))?
+            .map_err(|_| {
+                ApiError::bad_request(
+                    "invalid_upload",
+                    "That PDF upload did not come through cleanly.",
+                )
+            })?
             .to_vec();
 
         if bytes.is_empty() {
             return Err(ApiError::bad_request(
                 "empty_upload",
-                "event attachment must not be empty",
+                "That PDF looks empty. Choose another file.",
             ));
         }
 
         if bytes.len() > EVENT_ATTACHMENT_MAX_BYTES {
             return Err(ApiError::bad_request(
                 "upload_too_large",
-                "event attachment must be 25 MB or smaller",
+                "Keep each PDF at 25 MB or smaller.",
             ));
         }
 
         if !looks_like_pdf(&bytes) {
             return Err(ApiError::bad_request(
                 "invalid_pdf",
-                "event attachment must be a valid PDF file",
+                "That file does not look like a valid PDF.",
             ));
         }
 

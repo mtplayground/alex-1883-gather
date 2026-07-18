@@ -624,7 +624,7 @@ pub async fn send_event_invitations(
     if event.owner_sub != user.sub {
         return Err(ApiError::forbidden(
             "event_forbidden",
-            "only the organizer may invite people to this event",
+            "Only the organizer can invite people to that event.",
         ));
     }
 
@@ -785,7 +785,7 @@ pub async fn list_event_attendees(
     if !can_read {
         return Err(ApiError::forbidden(
             "event_forbidden",
-            "you do not have access to this event's attendees",
+            "That attendee list is private to the organizer and guest list.",
         ));
     }
 
@@ -956,7 +956,7 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 
@@ -987,7 +987,10 @@ async fn complete_rsvp_action(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| {
-            ApiError::forbidden("invitation_forbidden", "invitation belongs to another user")
+            ApiError::forbidden(
+                "invitation_forbidden",
+                "That invite belongs to another guest.",
+            )
         })?;
 
     state
@@ -1193,7 +1196,7 @@ fn ensure_invitee_can_use_invitation(
 
     Err(ApiError::forbidden(
         "invitation_forbidden",
-        "invitation belongs to another user",
+        "That invite belongs to another guest.",
     ))
 }
 

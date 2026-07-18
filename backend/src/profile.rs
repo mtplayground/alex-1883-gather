@@ -176,7 +176,10 @@ impl From<User> for AccountSettings {
 
 fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<CurrentUser> {
     user.map(|Extension(user)| user).ok_or_else(|| {
-        ApiError::unauthorized("not_authenticated", "valid platform session required")
+        ApiError::unauthorized(
+            "not_authenticated",
+            "Your session has expired. Sign in again to keep going.",
+        )
     })
 }
 
@@ -194,11 +197,12 @@ struct ProfilePhotoUpload {
 }
 
 async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhotoUpload> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| ApiError::bad_request("invalid_upload", "invalid multipart upload"))?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        ApiError::bad_request(
+            "invalid_upload",
+            "That upload did not come through cleanly.",
+        )
+    })? {
         let field_name = field.name().unwrap_or_default().to_string();
         if field_name != "photo" && field_name != "file" {
             continue;
@@ -210,26 +214,31 @@ async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhoto
             .ok_or_else(|| {
                 ApiError::bad_request(
                     "unsupported_image_type",
-                    "profile photo must be a JPEG, PNG, WebP, or GIF image",
+                    "Pick a JPEG, PNG, WebP, or GIF for your profile photo.",
                 )
             })?;
         let bytes = field
             .bytes()
             .await
-            .map_err(|_| ApiError::bad_request("invalid_upload", "invalid image upload"))?
+            .map_err(|_| {
+                ApiError::bad_request(
+                    "invalid_upload",
+                    "That image upload did not come through cleanly.",
+                )
+            })?
             .to_vec();
 
         if bytes.is_empty() {
             return Err(ApiError::bad_request(
                 "empty_upload",
-                "profile photo must not be empty",
+                "That profile photo looks empty. Choose another file.",
             ));
         }
 
         if bytes.len() > PROFILE_PHOTO_MAX_BYTES {
             return Err(ApiError::bad_request(
                 "upload_too_large",
-                "profile photo must be 5 MB or smaller",
+                "Keep your profile photo at 5 MB or smaller.",
             ));
         }
 
@@ -242,7 +251,7 @@ async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhoto
 
     Err(ApiError::bad_request(
         "missing_photo",
-        "multipart upload must include a photo file",
+        "Add a profile photo before uploading.",
     ))
 }
 

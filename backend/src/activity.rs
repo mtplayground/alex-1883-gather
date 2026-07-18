@@ -439,7 +439,7 @@ async fn ensure_can_read_event(
     } else {
         Err(ApiError::forbidden(
             "event_forbidden",
-            "event is not available to this user",
+            "That event is private to its organizer and guest list.",
         ))
     }
 }
@@ -457,7 +457,7 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 

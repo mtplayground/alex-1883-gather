@@ -196,7 +196,7 @@ pub async fn me(user: Option<Extension<CurrentUser>>) -> ApiResult<Json<CurrentU
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 
@@ -330,7 +330,7 @@ pub async fn register(
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 
@@ -358,7 +358,7 @@ pub async fn verify(
     let Some(Extension(user)) = user else {
         return Err(ApiError::unauthorized(
             "not_authenticated",
-            "valid platform session required",
+            "Your session has expired. Sign in again to keep going.",
         ));
     };
 

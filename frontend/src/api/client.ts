@@ -289,16 +289,22 @@ class ApiClient {
   }
 
   requestPasswordReset(email: string, returnTo = '/dashboard') {
-    return this.post<PasswordResetResponse>('/api/auth/password-reset/request', {
-      email,
-      return_to: this.frontendReturnTo(returnTo),
-    });
+    return this.post<PasswordResetResponse>(
+      '/api/auth/password-reset/request',
+      {
+        email,
+        return_to: this.frontendReturnTo(returnTo),
+      },
+    );
   }
 
   completePasswordReset(returnTo = '/dashboard') {
-    return this.post<PasswordResetResponse>('/api/auth/password-reset/complete', {
-      return_to: this.frontendReturnTo(returnTo),
-    });
+    return this.post<PasswordResetResponse>(
+      '/api/auth/password-reset/complete',
+      {
+        return_to: this.frontendReturnTo(returnTo),
+      },
+    );
   }
 
   loginUrl(returnPath = '/dashboard') {
@@ -512,16 +518,20 @@ class ApiClient {
     }
 
     let message = `API request failed: ${response.status}`;
+    let code: string | undefined;
+    let details: unknown;
     try {
       const body = (await response.json()) as {
-        error?: { message?: string };
+        error?: { code?: string; message?: string; details?: unknown };
       };
+      code = body.error?.code;
+      details = body.error?.details;
       message = body.error?.message ?? message;
     } catch {
       // Keep the status-based message when the response is not JSON.
     }
 
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code, details);
   }
 
   private authRedirectUrl(path: string, returnPath: string) {
@@ -539,6 +549,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
