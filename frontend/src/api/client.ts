@@ -150,6 +150,57 @@ export type EventAttachmentUploadResponse = {
   access_url: string;
 };
 
+export type EventInvitationRecord = {
+  id: string;
+  event_id: string;
+  inviter_sub: string;
+  invitee_sub: string | null;
+  invitee_email: string | null;
+  status: 'invited' | 'accepted' | 'declined' | 'cancelled' | string;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InvitationEmailDelivery = {
+  email: string;
+  status: 'sent' | 'skipped' | 'rate_limited' | 'failed';
+  id: string | null;
+  message: string | null;
+};
+
+export type SentInvitation = {
+  invitation: EventInvitationRecord;
+  email_delivery: InvitationEmailDelivery;
+};
+
+export type SendInvitationsResponse = {
+  invitations: SentInvitation[];
+};
+
+export type InvitationRecipientRequest = {
+  email: string;
+  name?: string | null;
+};
+
+export type EventAttendee = {
+  invitation_id: string;
+  event_id: string;
+  invitee_sub: string | null;
+  invitee_email: string | null;
+  display_name: string | null;
+  picture_url: string | null;
+  invitation_status: string;
+  rsvp_response: string | null;
+  rsvp_note: string | null;
+  responded_at: string | null;
+  updated_at: string;
+};
+
+export type EventAttendeeListResponse = {
+  attendees: EventAttendee[];
+};
+
 class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -266,6 +317,26 @@ class ApiClient {
       `/api/events/${encodeURIComponent(eventId)}/attachments/${encodeURIComponent(
         attachmentId,
       )}`,
+    );
+  }
+
+  sendEventInvitations(
+    eventId: string,
+    invitees: InvitationRecipientRequest[],
+    message?: string | null,
+  ) {
+    return this.post<SendInvitationsResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/invitations`,
+      {
+        invitees,
+        message: message?.trim() ? message.trim() : null,
+      },
+    );
+  }
+
+  eventAttendees(eventId: string) {
+    return this.get<EventAttendeeListResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/attendees`,
     );
   }
 

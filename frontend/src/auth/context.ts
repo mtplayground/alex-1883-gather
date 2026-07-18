@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 
 export type AuthUser = {
+  sub: string;
   name: string | null;
   email: string;
   emailVerified: boolean;

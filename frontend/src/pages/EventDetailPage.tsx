@@ -5,7 +5,9 @@ import {
   apiClient,
   type DashboardEventSummary,
   type EventAttachmentRecord,
+  type EventAttendee,
   type EventRecord,
+  type InvitationEmailDelivery,
 } from '../api/client';
 import { useAuth } from '../auth/useAuth';
 
@@ -14,6 +16,7 @@ type EventDetailState =
       status: 'loading';
       event: null;
       attachments: EventAttachmentRecord[];
+      attendees: EventAttendee[];
       dashboardEvent: null;
       error: null;
     }
@@ -21,6 +24,7 @@ type EventDetailState =
       status: 'ready';
       event: EventRecord;
       attachments: EventAttachmentRecord[];
+      attendees: EventAttendee[];
       dashboardEvent: DashboardEventSummary | null;
       error: null;
     }
@@ -28,9 +32,14 @@ type EventDetailState =
       status: 'error';
       event: null;
       attachments: EventAttachmentRecord[];
+      attendees: EventAttendee[];
       dashboardEvent: null;
       error: string;
     };
+
+type InviteFeedback =
+  | { tone: 'success' | 'error'; message: string; deliveries: InvitationEmailDelivery[] }
+  | null;
 
 export function EventDetailPage() {
   const { eventId } = useParams();
@@ -41,27 +50,46 @@ export function EventDetailPage() {
     status: 'loading',
     event: null,
     attachments: [],
+    attendees: [],
     dashboardEvent: null,
     error: null,
   });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [inviteEmails, setInviteEmails] = useState('');
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<InviteFeedback>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const currentUserSub = auth.user?.sub;
 
-    if (!eventId) {
+    const currentEventId = eventId ?? '';
+
+    if (!currentEventId) {
       return () => {
         cancelled = true;
       };
     }
 
-    Promise.all([
-      apiClient.event(eventId),
-      apiClient.eventAttachments(eventId),
-      apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
-    ])
-      .then(([event, attachmentResponse, dashboardResponse]) => {
+    async function loadEventDetail() {
+      try {
+        const [event, attachmentResponse, dashboardResponse] =
+          await Promise.all([
+            apiClient.event(currentEventId),
+            apiClient.eventAttachments(currentEventId),
+            apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
+          ]);
+
+        const attendees =
+          currentUserSub && event.owner_sub === currentUserSub
+            ? await apiClient
+                .eventAttendees(event.id)
+                .then((response) => response.attendees)
+                .catch(() => [])
+            : [];
+
         if (cancelled) {
           return;
         }
@@ -70,13 +98,13 @@ export function EventDetailPage() {
           status: 'ready',
           event,
           attachments: attachmentResponse.attachments,
+          attendees,
           dashboardEvent:
             dashboardResponse.events.find((item) => item.id === event.id) ??
             null,
           error: null,
         });
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         if (cancelled) {
           return;
         }
@@ -85,18 +113,22 @@ export function EventDetailPage() {
           status: 'error',
           event: null,
           attachments: [],
+          attendees: [],
           dashboardEvent: null,
           error:
             error instanceof Error
               ? error.message
               : 'We could not load this event.',
         });
-      });
+      }
+    }
+
+    void loadEventDetail();
 
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, auth.user?.sub]);
 
   const activityItems = useMemo(() => {
     if (detail.status !== 'ready') {
@@ -163,6 +195,8 @@ export function EventDetailPage() {
     detail.event.starts_at,
     detail.event.timezone,
   );
+  const isOrganizer = detail.event.owner_sub === auth.user?.sub;
+  const attendeeCounts = countAttendeeStatuses(detail.attendees);
 
   async function downloadAttachment(attachment: EventAttachmentRecord) {
     if (!eventId) {
@@ -191,6 +225,75 @@ export function EventDetailPage() {
       );
     } finally {
       setDownloadingId(null);
+    }
+  }
+
+  async function sendInvites() {
+    if (detail.status !== 'ready') {
+      return;
+    }
+
+    const currentEvent = detail.event;
+    const currentAttendees = detail.attendees;
+    const emails = parseInviteEmails(inviteEmails);
+
+    if (!emails.length) {
+      setInviteFeedback({
+        tone: 'error',
+        message: 'Add at least one email address.',
+        deliveries: [],
+      });
+      return;
+    }
+
+    setInviteSending(true);
+    setInviteFeedback(null);
+
+    try {
+      const response = await apiClient.sendEventInvitations(
+        currentEvent.id,
+        emails.map((email) => ({ email })),
+        inviteMessage,
+      );
+      const attendeeResponse = await apiClient
+        .eventAttendees(currentEvent.id)
+        .catch(() => ({ attendees: currentAttendees }));
+      const deliveries = response.invitations.map(
+        (invitation) => invitation.email_delivery,
+      );
+      const sentCount = deliveries.filter(
+        (delivery) => delivery.status === 'sent',
+      ).length;
+
+      setDetail((current) =>
+        current.status === 'ready'
+          ? {
+              ...current,
+              attendees: attendeeResponse.attendees,
+            }
+          : current,
+      );
+      setInviteEmails('');
+      setInviteMessage('');
+      setInviteFeedback({
+        tone: 'success',
+        message:
+          sentCount === deliveries.length
+            ? `Sent ${sentCount} invite${sentCount === 1 ? '' : 's'}.`
+            : `Created ${deliveries.length} invite${deliveries.length === 1 ? '' : 's'} with ${sentCount} sent.`,
+        deliveries,
+      });
+    } catch (error) {
+      setInviteFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Those invites could not be sent.',
+        deliveries: [],
+      });
+    } finally {
+      setInviteSending(false);
     }
   }
 
@@ -240,17 +343,31 @@ export function EventDetailPage() {
             ) : null}
           </section>
 
-          <section className="rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
-            <p className="text-sm font-black uppercase text-teal">RSVPs</p>
-            <ul className="mt-4 space-y-3">
-              <li className="flex items-center justify-between gap-3 rounded-lg border-2 border-ink bg-mint px-3 py-2">
-                <span className="font-black">{displayName}</span>
-                <span className="rounded-lg bg-white px-3 py-1 text-sm font-black">
-                  {relationship}
-                </span>
-              </li>
-            </ul>
-          </section>
+          {isOrganizer ? (
+            <OrganizerInvitePanel
+              attendees={detail.attendees}
+              counts={attendeeCounts}
+              feedback={inviteFeedback}
+              inviteEmails={inviteEmails}
+              inviteMessage={inviteMessage}
+              isSending={inviteSending}
+              onEmailsChange={setInviteEmails}
+              onMessageChange={setInviteMessage}
+              onSend={() => void sendInvites()}
+            />
+          ) : (
+            <section className="rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
+              <p className="text-sm font-black uppercase text-teal">RSVPs</p>
+              <ul className="mt-4 space-y-3">
+                <li className="flex items-center justify-between gap-3 rounded-lg border-2 border-ink bg-mint px-3 py-2">
+                  <span className="font-black">{displayName}</span>
+                  <span className="rounded-lg bg-white px-3 py-1 text-sm font-black">
+                    {relationship}
+                  </span>
+                </li>
+              </ul>
+            </section>
+          )}
         </aside>
       </div>
 
@@ -358,6 +475,154 @@ function EventDetailLoading() {
   );
 }
 
+function OrganizerInvitePanel({
+  attendees,
+  counts,
+  feedback,
+  inviteEmails,
+  inviteMessage,
+  isSending,
+  onEmailsChange,
+  onMessageChange,
+  onSend,
+}: {
+  attendees: EventAttendee[];
+  counts: Record<string, number>;
+  feedback: InviteFeedback;
+  inviteEmails: string;
+  inviteMessage: string;
+  isSending: boolean;
+  onEmailsChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onSend: () => void;
+}) {
+  return (
+    <section className="rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black uppercase text-teal">Invites</p>
+          <h3 className="mt-1 text-2xl font-black">Guest list</h3>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
+          {counts.accepted ?? 0} going
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        {[
+          ['Invited', counts.invited ?? 0, 'bg-paper'],
+          ['Going', counts.accepted ?? 0, 'bg-mint'],
+          ['Declined', counts.declined ?? 0, 'bg-coral text-white'],
+        ].map(([label, value, className]) => (
+          <div
+            className={`rounded-lg border-2 border-ink px-2 py-2 ${className}`}
+            key={label}
+          >
+            <p className="text-lg font-black">{value}</p>
+            <p className="text-[0.65rem] font-black uppercase">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      <form
+        className="mt-5 space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSend();
+        }}
+      >
+        <label className="block">
+          <span className="text-sm font-black uppercase text-slate-600">
+            Emails
+          </span>
+          <textarea
+            className="mt-2 min-h-24 w-full rounded-lg border-2 border-ink bg-paper px-3 py-2 font-bold outline-none focus:bg-white"
+            onChange={(event) => onEmailsChange(event.target.value)}
+            placeholder="friend@example.com, crew@example.com"
+            value={inviteEmails}
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-black uppercase text-slate-600">
+            Note
+          </span>
+          <textarea
+            className="mt-2 min-h-20 w-full rounded-lg border-2 border-ink bg-paper px-3 py-2 outline-none focus:bg-white"
+            maxLength={1000}
+            onChange={(event) => onMessageChange(event.target.value)}
+            placeholder="Bring your favorite snack."
+            value={inviteMessage}
+          />
+        </label>
+        <button
+          className="flex min-h-11 w-full items-center justify-center rounded-lg border-2 border-ink bg-teal px-4 py-2 font-black text-white shadow-sticker transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
+          disabled={isSending}
+          type="submit"
+        >
+          {isSending ? 'Sending' : 'Send invites'}
+        </button>
+      </form>
+
+      {feedback ? (
+        <div
+          className={`mt-4 rounded-lg border-2 border-ink p-3 ${
+            feedback.tone === 'success' ? 'bg-mint' : 'bg-coral text-white'
+          }`}
+        >
+          <p className="font-black">{feedback.message}</p>
+          {feedback.deliveries.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-sm font-bold">
+              {feedback.deliveries.map((delivery) => (
+                <li
+                  className="flex items-center justify-between gap-2"
+                  key={delivery.email}
+                >
+                  <span className="min-w-0 truncate">{delivery.email}</span>
+                  <span className="shrink-0 uppercase">
+                    {deliveryLabel(delivery.status)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ul className="mt-5 max-h-80 space-y-3 overflow-y-auto pr-1">
+        {attendees.length > 0 ? (
+          attendees.map((attendee) => (
+            <li
+              className="flex items-center justify-between gap-3 rounded-lg border-2 border-ink bg-paper px-3 py-2"
+              key={attendee.invitation_id}
+            >
+              <div className="min-w-0">
+                <p className="truncate font-black">{attendeeName(attendee)}</p>
+                <p className="truncate text-sm font-bold text-slate-600">
+                  {attendee.invitee_email ?? attendee.invitee_sub}
+                </p>
+              </div>
+              <span
+                className={`shrink-0 rounded-lg border-2 border-ink px-2 py-1 text-xs font-black uppercase ${statusBadgeClass(
+                  attendee.invitation_status,
+                )}`}
+              >
+                {attendeeStatusLabel(attendee)}
+              </span>
+            </li>
+          ))
+        ) : (
+          <li className="rounded-lg border-2 border-ink bg-paper p-3">
+            <p className="font-black">No guests yet</p>
+            <p className="mt-1 text-sm text-slate-700">
+              Send the first invite and the list will fill in here.
+            </p>
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
 function relationshipLabel(relationship: string) {
   switch (relationship) {
     case 'organizer':
@@ -415,4 +680,82 @@ function formatBytes(bytes: number) {
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function parseInviteEmails(value: string) {
+  const seen = new Set<string>();
+
+  return value
+    .split(/[\s,;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.includes('@') && !email.startsWith('@') && !email.endsWith('@'))
+    .filter((email) => {
+      if (seen.has(email)) {
+        return false;
+      }
+
+      seen.add(email);
+      return true;
+    });
+}
+
+function countAttendeeStatuses(attendees: EventAttendee[]) {
+  return attendees.reduce<Record<string, number>>((counts, attendee) => {
+    counts[attendee.invitation_status] =
+      (counts[attendee.invitation_status] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function attendeeName(attendee: EventAttendee) {
+  return (
+    attendee.display_name?.trim() ||
+    attendee.invitee_email?.split('@')[0] ||
+    attendee.invitee_sub ||
+    'Guest'
+  );
+}
+
+function attendeeStatusLabel(attendee: EventAttendee) {
+  if (attendee.rsvp_response === 'yes') {
+    return 'Going';
+  }
+
+  if (attendee.rsvp_response === 'maybe') {
+    return 'Maybe';
+  }
+
+  if (attendee.rsvp_response === 'no') {
+    return 'No';
+  }
+
+  return relationshipLabel(attendee.invitation_status);
+}
+
+function deliveryLabel(status: InvitationEmailDelivery['status']) {
+  switch (status) {
+    case 'sent':
+      return 'sent';
+    case 'skipped':
+      return 'queued';
+    case 'rate_limited':
+      return 'wait';
+    case 'failed':
+      return 'failed';
+    default:
+      return status;
+  }
+}
+
+function statusBadgeClass(status: string) {
+  switch (status) {
+    case 'accepted':
+      return 'bg-mint';
+    case 'declined':
+      return 'bg-coral text-white';
+    case 'cancelled':
+      return 'bg-slate-200';
+    default:
+      return 'bg-white';
+  }
 }
