@@ -432,16 +432,16 @@ fn validate_email(errors: &mut ValidationErrors, email: &str) {
 async fn send_registration_email(state: &AppState, user: &CurrentUser) -> EmailDelivery {
     let name = display_name(user).unwrap_or("there");
     let subject = if user.registered {
-        "Welcome in - your gathering space is ready"
+        "Welcome in - your table is ready"
     } else {
-        "Welcome back - your gathering space is ready"
+        "Welcome back - your table is ready"
     };
     let html = templates::registration_html(name, user.email_verified);
     let text = if user.email_verified {
-        format!("Hi {name}, your account is ready.")
+        format!("Hi {name}, your account is ready. Time to gather your people.")
     } else {
         format!(
-            "Hi {name}, your account is ready. Your email is still pending platform verification."
+            "Hi {name}, your account is ready. Your email still needs platform verification when you have a minute."
         )
     };
     let message = EmailMessage::new(user.email.clone(), subject)
@@ -480,10 +480,10 @@ async fn send_password_reset_email(
     email: &str,
     login_url: &str,
 ) -> EmailDelivery {
-    let subject = "Your sign-in link is ready";
+    let subject = "Your fresh sign-in link is ready";
     let html = templates::password_reset_html(login_url);
     let text = format!(
-        "Use this secure platform sign-in link to get back in: {login_url}\n\nIf you did not ask for this, you can ignore this email."
+        "Use this secure platform sign-in link to hop back in: {login_url}\n\nIf you did not ask for this, you can ignore this email."
     );
     let message = EmailMessage::new(email.trim().to_string(), subject)
         .html(html)

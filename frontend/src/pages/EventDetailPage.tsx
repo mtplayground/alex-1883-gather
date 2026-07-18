@@ -306,8 +306,8 @@ export function EventDetailPage() {
         tone: 'success',
         message:
           sentCount === deliveries.length
-            ? `Sent ${sentCount} invite${sentCount === 1 ? '' : 's'}.`
-            : `Created ${deliveries.length} invite${deliveries.length === 1 ? '' : 's'} with ${sentCount} sent.`,
+            ? `Sent ${sentCount} invite${sentCount === 1 ? '' : 's'}. The table is growing.`
+            : `Created ${deliveries.length} invite${deliveries.length === 1 ? '' : 's'} with ${sentCount} sent. The rest can retry shortly.`,
         deliveries,
       });
     } catch (error) {
@@ -363,7 +363,10 @@ export function EventDetailPage() {
       );
       setRsvpFeedback({
         tone: 'success',
-        message: rsvpChoice === 'yes' ? "You're on the list." : 'RSVP saved.',
+        message:
+          rsvpChoice === 'yes'
+            ? "You're on the list. Tiny cheer from the guest list."
+            : 'RSVP saved. Guest list refreshed.',
       });
 
       if (rsvpChoice === 'yes') {
@@ -694,7 +697,9 @@ function OrganizerInvitePanel({
       {feedback ? (
         <div
           className={`mt-4 rounded-lg border-2 border-ink p-3 ${
-            feedback.tone === 'success' ? 'bg-mint' : 'bg-coral text-white'
+            feedback.tone === 'success'
+              ? 'vibe-pop vibe-pulse-ring bg-mint'
+              : 'bg-coral text-white'
           }`}
         >
           <p className="font-black">{feedback.message}</p>
@@ -777,8 +782,8 @@ function MemberRsvpPanel({
   return (
     <section className="relative overflow-hidden rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
       {isCelebrating ? (
-        <div className="pointer-events-none absolute right-4 top-4 animate-bounce rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
-          You&apos;re in!
+        <div className="pointer-events-none absolute right-4 top-4 vibe-pop rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
+          RSVP glow-up
         </div>
       ) : null}
 
@@ -797,7 +802,7 @@ function MemberRsvpPanel({
           return (
             <button
               className={`min-h-12 rounded-lg border-2 border-ink px-2 py-2 text-sm font-black shadow-sticker transition hover:-translate-y-0.5 ${
-                active ? activeClass : 'bg-paper'
+                active ? `${activeClass} vibe-pulse-ring` : 'bg-paper'
               }`}
               key={value}
               onClick={() =>
@@ -836,7 +841,9 @@ function MemberRsvpPanel({
       {feedback ? (
         <div
           className={`mt-4 rounded-lg border-2 border-ink p-3 font-black ${
-            feedback.tone === 'success' ? 'bg-mint' : 'bg-coral text-white'
+            feedback.tone === 'success'
+              ? 'vibe-pop vibe-pulse-ring bg-mint'
+              : 'bg-coral text-white'
           }`}
         >
           {feedback.message}
@@ -959,8 +966,8 @@ function CommentThread({
   return (
     <section className="relative overflow-hidden rounded-lg border-4 border-ink bg-paper p-5 shadow-sticker">
       {celebratedCommentId ? (
-        <div className="pointer-events-none absolute right-4 top-4 animate-bounce rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
-          New comment
+        <div className="pointer-events-none absolute right-4 top-4 vibe-pop rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
+          New comment landed
         </div>
       ) : null}
 
@@ -983,7 +990,7 @@ function CommentThread({
             return (
               <div
                 className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${
-                  isFresh ? 'animate-pulse' : ''
+                  isFresh ? 'vibe-pop' : ''
                 }`}
                 key={comment.id}
               >
@@ -1015,7 +1022,7 @@ function CommentThread({
           <div className="rounded-lg border-2 border-ink bg-white p-4">
             <p className="font-black">No comments yet</p>
             <p className="mt-1 text-slate-700">
-              Start the thread with a quick update for everyone.
+              Start the thread with a quick detail, question, or toast.
             </p>
           </div>
         )}

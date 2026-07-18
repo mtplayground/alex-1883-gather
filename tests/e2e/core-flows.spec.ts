@@ -253,7 +253,7 @@ test('core event journey creates, invites, RSVPs, comments, and updates activity
   await expect(page.getByText('Can bring dessert.')).toBeVisible();
   await expect(page.getByText('Taylor Guest added a comment.')).toBeVisible();
   await expect(
-    page.locator('div.animate-bounce', { hasText: 'New comment' }),
+    page.locator('div.vibe-pop', { hasText: 'New comment' }),
   ).toBeVisible();
 });
 
