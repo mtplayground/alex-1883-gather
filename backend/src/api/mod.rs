@@ -50,6 +50,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api", get(api_info))
         .route("/api/auth/login", get(auth::login).post(auth::login_link))
+        .route("/api/auth/google", get(auth::google_login))
+        .route("/api/auth/google/callback", get(auth::google_callback))
         .route("/api/auth/register", axum::routing::post(auth::register))
         .route("/api/auth/verify", get(auth::verify))
         .route("/api/health", get(health))

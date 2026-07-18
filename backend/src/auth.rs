@@ -216,13 +216,7 @@ pub async fn login(
     State(state): State<AppState>,
     Query(query): Query<LoginRequest>,
 ) -> ApiResult<Redirect> {
-    let return_to = frontend_return_to(&state.self_url, query.return_to.as_deref())?;
-    let login_url = state
-        .auth
-        .login_url(&return_to)
-        .map_err(ApiError::internal)?;
-
-    Ok(Redirect::to(&login_url))
+    platform_login_redirect(&state, query.return_to.as_deref())
 }
 
 pub async fn login_link(
@@ -236,6 +230,32 @@ pub async fn login_link(
         .map_err(ApiError::internal)?;
 
     Ok(Json(LoginResponse { login_url }))
+}
+
+pub async fn google_login(
+    State(state): State<AppState>,
+    Query(query): Query<LoginRequest>,
+) -> ApiResult<Redirect> {
+    platform_login_redirect(&state, query.return_to.as_deref())
+}
+
+pub async fn google_callback(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Query(query): Query<LoginRequest>,
+) -> ApiResult<Redirect> {
+    let return_to = frontend_return_to(&state.self_url, query.return_to.as_deref())?;
+
+    if user.is_some() {
+        return Ok(Redirect::to(&return_to));
+    }
+
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+
+    Ok(Redirect::to(&login_url))
 }
 
 pub async fn register(
@@ -376,6 +396,19 @@ fn frontend_return_to(self_url: &str, requested: Option<&str>) -> ApiResult<Stri
     }
 
     Ok(return_to.to_string())
+}
+
+fn platform_login_redirect(
+    state: &AppState,
+    requested_return_to: Option<&str>,
+) -> ApiResult<Redirect> {
+    let return_to = frontend_return_to(&state.self_url, requested_return_to)?;
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+
+    Ok(Redirect::to(&login_url))
 }
 
 impl fmt::Display for AuthError {
