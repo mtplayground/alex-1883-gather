@@ -24,13 +24,34 @@ pub const ACTIVITY_EVENT_EDITED: &str = "event.edited";
 const COMMENT_BODY_MAX_CHARS: usize = 2_000;
 
 #[derive(Clone, Debug, serde::Serialize, FromRow)]
-pub struct EventComment {
+struct EventCommentRow {
     pub id: String,
     pub event_id: String,
     pub author_sub: String,
+    pub author_email: String,
+    pub author_name: Option<String>,
+    pub author_picture_url: Option<String>,
     pub body: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EventComment {
+    pub id: String,
+    pub event_id: String,
+    pub author: EventCommentAuthor,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EventCommentAuthor {
+    pub sub: String,
+    pub email: String,
+    pub name: Option<String>,
+    pub picture_url: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -83,22 +104,37 @@ impl ActivityRepository {
         let id = uuid::Uuid::new_v4().to_string();
         let body = draft.body.trim();
 
-        sqlx::query_as::<_, EventComment>(
+        sqlx::query_as::<_, EventCommentRow>(
             r#"
-            INSERT INTO event_comments (
-                id,
-                event_id,
-                author_sub,
-                body
+            WITH inserted AS (
+                INSERT INTO event_comments (
+                    id,
+                    event_id,
+                    author_sub,
+                    body
+                )
+                VALUES ($1, $2, $3, $4)
+                RETURNING
+                    id,
+                    event_id,
+                    author_sub,
+                    body,
+                    created_at,
+                    updated_at
             )
-            VALUES ($1, $2, $3, $4)
-            RETURNING
-                id,
-                event_id,
-                author_sub,
-                body,
-                created_at,
-                updated_at
+            SELECT
+                inserted.id,
+                inserted.event_id,
+                inserted.author_sub,
+                users.email AS author_email,
+                COALESCE(profiles.display_name, users.name) AS author_name,
+                users.picture_url AS author_picture_url,
+                inserted.body,
+                inserted.created_at,
+                inserted.updated_at
+            FROM inserted
+            JOIN users ON users.sub = inserted.author_sub
+            LEFT JOIN profiles ON profiles.user_sub = inserted.author_sub
             "#,
         )
         .bind(id)
@@ -107,26 +143,34 @@ impl ActivityRepository {
         .bind(body)
         .fetch_one(&self.pool)
         .await
+        .map(EventComment::from)
     }
 
     pub async fn list_comments(&self, event_id: &str) -> Result<Vec<EventComment>, sqlx::Error> {
-        sqlx::query_as::<_, EventComment>(
+        let rows = sqlx::query_as::<_, EventCommentRow>(
             r#"
             SELECT
-                id,
-                event_id,
-                author_sub,
-                body,
-                created_at,
-                updated_at
+                event_comments.id,
+                event_comments.event_id,
+                event_comments.author_sub,
+                users.email AS author_email,
+                COALESCE(profiles.display_name, users.name) AS author_name,
+                users.picture_url AS author_picture_url,
+                event_comments.body,
+                event_comments.created_at,
+                event_comments.updated_at
             FROM event_comments
-            WHERE event_id = $1
-            ORDER BY created_at ASC, id ASC
+            JOIN users ON users.sub = event_comments.author_sub
+            LEFT JOIN profiles ON profiles.user_sub = event_comments.author_sub
+            WHERE event_comments.event_id = $1
+            ORDER BY event_comments.created_at ASC, event_comments.id ASC
             "#,
         )
         .bind(event_id)
         .fetch_all(&self.pool)
-        .await
+        .await?;
+
+        Ok(rows.into_iter().map(EventComment::from).collect())
     }
 
     pub async fn record_activity(
@@ -193,6 +237,24 @@ impl ActivityRepository {
         .bind(event_id)
         .fetch_all(&self.pool)
         .await
+    }
+}
+
+impl From<EventCommentRow> for EventComment {
+    fn from(row: EventCommentRow) -> Self {
+        Self {
+            id: row.id,
+            event_id: row.event_id,
+            author: EventCommentAuthor {
+                sub: row.author_sub,
+                email: row.author_email,
+                name: row.author_name,
+                picture_url: row.author_picture_url,
+            },
+            body: row.body,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
     }
 }
 
@@ -339,9 +401,11 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+
     use crate::api::validation::ValidateRequest;
 
-    use super::{EventCommentDraft, ACTIVITY_COMMENT_CREATED};
+    use super::{EventComment, EventCommentDraft, EventCommentRow, ACTIVITY_COMMENT_CREATED};
 
     #[test]
     fn comment_body_must_not_be_blank() {
@@ -355,5 +419,30 @@ mod tests {
     #[test]
     fn comment_activity_type_is_stable() {
         assert_eq!(ACTIVITY_COMMENT_CREATED, "comment.created");
+    }
+
+    #[test]
+    fn comment_rows_expose_author_details() {
+        let row = EventCommentRow {
+            id: "comment-1".to_string(),
+            event_id: "event-1".to_string(),
+            author_sub: "user-1".to_string(),
+            author_email: "person@example.com".to_string(),
+            author_name: Some("Person".to_string()),
+            author_picture_url: Some("https://example.com/person.png".to_string()),
+            body: "Looks good.".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let comment = EventComment::from(row);
+
+        assert_eq!(comment.author.sub, "user-1");
+        assert_eq!(comment.author.email, "person@example.com");
+        assert_eq!(comment.author.name.as_deref(), Some("Person"));
+        assert_eq!(
+            comment.author.picture_url.as_deref(),
+            Some("https://example.com/person.png")
+        );
     }
 }
