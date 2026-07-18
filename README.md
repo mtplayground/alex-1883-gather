@@ -35,3 +35,5 @@ User persistence is keyed by the verified platform auth subject. The `users` tab
 Requests carrying an `mctai_session` cookie are verified against the platform JWKS, upserted into the local `users` table, and exposed to handlers through request extensions. The backend does not issue app JWTs or store passwords.
 
 `POST /api/auth/register` records the current platform-authenticated user locally and sends a friendly registration email through the platform email proxy when configured. `GET /api/auth/verify` reports the platform email-verification status from the verified session.
+
+`GET /api/auth/login` redirects to the platform login page with a safe frontend `return_to`; `POST /api/auth/login` returns the same URL as JSON for clients that need to render their own button.

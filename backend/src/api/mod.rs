@@ -24,6 +24,7 @@ pub struct AppState {
     pub auth: AuthVerifier,
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
+    pub self_url: String,
     pub storage: ObjectStorage,
     pub users: UserRepository,
 }
@@ -48,6 +49,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/api", get(api_info))
+        .route("/api/auth/login", get(auth::login).post(auth::login_link))
         .route("/api/auth/register", axum::routing::post(auth::register))
         .route("/api/auth/verify", get(auth::verify))
         .route("/api/health", get(health))
