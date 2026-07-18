@@ -1,34 +1,34 @@
-import { config } from './config';
+import {
+  Navigate,
+  Route,
+  BrowserRouter as Router,
+  Routes,
+} from 'react-router-dom';
+
+import { AuthProvider } from './auth/AuthProvider';
+import { AppShell } from './components/AppShell';
+import { AuthPage } from './pages/AuthPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { EventDetailPage } from './pages/EventDetailPage';
+import { InvitePage } from './pages/InvitePage';
+import { ProfilePage } from './pages/ProfilePage';
 
 export function App() {
   return (
-    <main className="app-shell">
-      <section className="workspace-panel" aria-labelledby="workspace-title">
-        <p className="eyebrow">Issue #1</p>
-        <h1 id="workspace-title">Full-stack workspace initialized</h1>
-        <p>
-          The React client and Rust API are ready for focused feature work in
-          later issues.
-        </p>
-        <dl className="status-grid" aria-label="Project entry points">
-          <div>
-            <dt>Frontend</dt>
-            <dd>Vite React SPA</dd>
-          </div>
-          <div>
-            <dt>Backend</dt>
-            <dd>Axum on port 8080</dd>
-          </div>
-          <div>
-            <dt>API health</dt>
-            <dd>/health</dd>
-          </div>
-          <div>
-            <dt>API base</dt>
-            <dd>{config.apiBaseUrl}</dd>
-          </div>
-        </dl>
-      </section>
-    </main>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<Navigate replace to="/dashboard" />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/events/:eventId" element={<EventDetailPage />} />
+            <Route path="/invite/:inviteCode" element={<InvitePage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="*" element={<Navigate replace to="/dashboard" />} />
+          </Route>
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
