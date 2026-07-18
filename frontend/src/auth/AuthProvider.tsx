@@ -9,6 +9,7 @@ import { AuthContext, type AuthContextValue, type AuthUser } from './context';
 
 function toAuthUser(user: CurrentUserResponse): AuthUser {
   return {
+    sub: user.sub,
     name: user.name,
     email: user.email,
     emailVerified: user.email_verified,
