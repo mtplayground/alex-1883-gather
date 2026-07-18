@@ -233,6 +233,52 @@ pub mod templates {
         )
     }
 
+    pub fn event_invitation_html(
+        event_title: &str,
+        inviter_name: &str,
+        invite_url: &str,
+        message: Option<&str>,
+    ) -> String {
+        let event_title = escape_html(event_title);
+        let inviter_name = escape_html(inviter_name);
+        let invite_url = escape_html(invite_url);
+        let message_html = message
+            .filter(|message| !message.trim().is_empty())
+            .map(|message| format!("<p>{}</p>", escape_html(message.trim())))
+            .unwrap_or_default();
+
+        format!(
+            r#"<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+    <h1 style="font-size: 20px;">You're invited to {event_title}</h1>
+    <p>{inviter_name} invited you to join this gathering.</p>
+    {message_html}
+    <p><a href="{invite_url}" style="color: #0f766e; font-weight: bold;">Accept or decline the invitation</a></p>
+    <p style="color: #6b7280; font-size: 13px;">This link takes you to the event invitation page.</p>
+  </body>
+</html>"#
+        )
+    }
+
+    pub fn event_invitation_text(
+        event_title: &str,
+        inviter_name: &str,
+        invite_url: &str,
+        message: Option<&str>,
+    ) -> String {
+        let mut body = format!(
+            "{inviter_name} invited you to {event_title}.\n\nAccept or decline here: {invite_url}"
+        );
+
+        if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
+            body.push_str("\n\nMessage from the organizer:\n");
+            body.push_str(message.trim());
+        }
+
+        body
+    }
+
     fn escape_html(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -260,6 +306,21 @@ mod tests {
 
         assert!(html.contains("&lt;Welcome&gt;"));
         assert!(html.contains("One &amp; two"));
+    }
+
+    #[test]
+    fn invitation_template_escapes_copy_and_links_response() {
+        let html = templates::event_invitation_html(
+            "<Launch>",
+            "Alex & Sam",
+            "https://example.com/invite/token",
+            Some("Bring <notes>"),
+        );
+
+        assert!(html.contains("&lt;Launch&gt;"));
+        assert!(html.contains("Alex &amp; Sam"));
+        assert!(html.contains("Bring &lt;notes&gt;"));
+        assert!(html.contains("https://example.com/invite/token"));
     }
 
     #[test]

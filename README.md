@@ -59,3 +59,5 @@ Event organizers and invited/accepted members can manage PDF materials through `
 `GET /api/dashboard/events` returns the current user's upcoming organized, invited, or joined events ordered by start time for the dashboard. The optional `limit` query parameter is clamped from 1 to 100, and events with cover images include a short-lived `cover_image_url`.
 
 Invitations are modeled in `event_invitations` with event, inviter, invitee, lifecycle status, and optional message fields. RSVP responses are stored in `event_rsvps` with casual `yes`, `no`, or `maybe` responses linked back to the invitation, event, and responding user.
+
+`POST /api/events/:event_id/invitations` lets the event organizer invite up to 50 email recipients at a time. The endpoint creates or refreshes invitation records with response tokens, sends friendly accept/decline emails through the configured platform email proxy, and returns per-recipient delivery statuses of `sent`, `skipped`, `rate_limited`, or `failed`.
