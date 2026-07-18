@@ -1,3 +1,7 @@
+import { Link } from 'react-router-dom';
+
+import { useAuth } from '../auth/useAuth';
+
 const cards = [
   {
     icon: '🎪',
@@ -20,17 +24,29 @@ const cards = [
 ];
 
 export function DashboardPage() {
+  const auth = useAuth();
+  const displayName =
+    auth.user?.name?.trim() || auth.user?.email.split('@')[0] || 'friend';
+
   return (
     <section className="space-y-6">
       <div className="rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
         <p className="text-sm font-black uppercase text-teal">Dashboard</p>
         <h2 className="mt-2 text-4xl font-black leading-tight">
-          A bright starting point for every gathering.
+          Welcome back, {displayName}.
         </h2>
         <p className="mt-4 max-w-2xl text-lg text-slate-700">
-          Placeholder cards mark the core areas that later issues will fill with
-          real event planning flows.
+          Your account session is active. Keep planning, check invites, or tune
+          your host profile before the next gathering takes shape.
         </p>
+        {auth.user && !auth.user.emailVerified ? (
+          <Link
+            className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-ink bg-sunny px-4 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
+            to="/auth?mode=verify"
+          >
+            Check email verification
+          </Link>
+        ) : null}
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         {cards.map((card) => (
