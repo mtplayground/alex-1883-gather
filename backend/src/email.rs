@@ -279,6 +279,46 @@ pub mod templates {
         body
     }
 
+    pub fn rsvp_confirmation_html(
+        event_title: &str,
+        response_label: &str,
+        note: Option<&str>,
+    ) -> String {
+        let event_title = escape_html(event_title);
+        let response_label = escape_html(response_label);
+        let note_html = note
+            .filter(|note| !note.trim().is_empty())
+            .map(|note| format!("<p>Your note: {}</p>", escape_html(note.trim())))
+            .unwrap_or_default();
+
+        format!(
+            r#"<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+    <h1 style="font-size: 20px;">RSVP received</h1>
+    <p>Your RSVP for {event_title} is now <strong>{response_label}</strong>.</p>
+    {note_html}
+    <p style="color: #6b7280; font-size: 13px;">You can update your RSVP from the event invitation page.</p>
+  </body>
+</html>"#
+        )
+    }
+
+    pub fn rsvp_confirmation_text(
+        event_title: &str,
+        response_label: &str,
+        note: Option<&str>,
+    ) -> String {
+        let mut body = format!("Your RSVP for {event_title} is now {response_label}.");
+
+        if let Some(note) = note.filter(|note| !note.trim().is_empty()) {
+            body.push_str("\n\nYour note:\n");
+            body.push_str(note.trim());
+        }
+
+        body
+    }
+
     fn escape_html(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -321,6 +361,14 @@ mod tests {
         assert!(html.contains("Alex &amp; Sam"));
         assert!(html.contains("Bring &lt;notes&gt;"));
         assert!(html.contains("https://example.com/invite/token"));
+    }
+
+    #[test]
+    fn rsvp_confirmation_template_escapes_note() {
+        let html = templates::rsvp_confirmation_html("<Launch>", "Yes", Some("See <you> there"));
+
+        assert!(html.contains("&lt;Launch&gt;"));
+        assert!(html.contains("See &lt;you&gt; there"));
     }
 
     #[test]
