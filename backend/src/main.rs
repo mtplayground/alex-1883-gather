@@ -6,6 +6,7 @@ use alex_1883_gather_backend::{
     db,
     email::EmailDispatcher,
     storage::ObjectStorage,
+    users::UserRepository,
 };
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -28,11 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::verify_connection(&db_pool).await?;
     let email = EmailDispatcher::from_config(&config.email);
     let storage = ObjectStorage::from_config(&config.object_storage);
+    let users = UserRepository::new(db_pool.clone());
 
     let state = AppState {
         db_pool,
         email,
         storage,
+        users,
     };
     let app = api::router(state);
     let listener = TcpListener::bind(addr).await?;
