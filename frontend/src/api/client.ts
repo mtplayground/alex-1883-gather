@@ -95,6 +95,41 @@ export type DashboardEventsResponse = {
   events: DashboardEventSummary[];
 };
 
+export type EventRecord = {
+  id: string;
+  owner_sub: string;
+  title: string;
+  description: string | null;
+  starts_at: string;
+  timezone: string | null;
+  cover_image_object_key: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventAttachmentRecord = {
+  id: string;
+  event_id: string;
+  uploaded_by_sub: string;
+  object_key: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  page_count: number | null;
+  metadata: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventAttachmentListResponse = {
+  attachments: EventAttachmentRecord[];
+};
+
+export type EventAttachmentDownloadResponse = {
+  attachment: EventAttachmentRecord;
+  access_url: string;
+};
+
 class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -154,6 +189,24 @@ class ApiClient {
     const params = new URLSearchParams({ limit: String(limit) });
     return this.get<DashboardEventsResponse>(
       `/api/dashboard/events?${params.toString()}`,
+    );
+  }
+
+  event(eventId: string) {
+    return this.get<EventRecord>(`/api/events/${encodeURIComponent(eventId)}`);
+  }
+
+  eventAttachments(eventId: string) {
+    return this.get<EventAttachmentListResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/attachments`,
+    );
+  }
+
+  eventAttachmentDownload(eventId: string, attachmentId: string) {
+    return this.get<EventAttachmentDownloadResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/attachments/${encodeURIComponent(
+        attachmentId,
+      )}/download`,
     );
   }
 
