@@ -7,11 +7,13 @@ const navigation = [
   { to: '/events/summer-supper', label: 'Event', icon: '🎈' },
   { to: '/invite/teal-table', label: 'Invite', icon: '💌' },
   { to: '/profile', label: 'Profile', icon: '🌟' },
-  { to: '/auth', label: 'Auth', icon: '🔐' },
+  { to: '/auth', label: 'Account', icon: '🔐' },
 ];
 
 export function AppShell() {
   const auth = useAuth();
+  const displayName =
+    auth.user?.name?.trim() || auth.user?.email.split('@')[0] || 'friend';
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#ffd166_0_14%,transparent_15%),linear-gradient(135deg,#fffaf0_0%,#e9fff8_52%,#fff0ee_100%)] text-ink">
@@ -25,12 +27,34 @@ export function AppShell() {
               Playful planning shell
             </h1>
           </div>
-          <a
-            className="inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-ink bg-sunny px-4 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
-            href={auth.buildLoginUrl('/dashboard')}
-          >
-            Sign in
-          </a>
+          {auth.status === 'signed-in' && auth.user ? (
+            <div className="flex items-center gap-3 rounded-lg border-2 border-ink bg-white px-3 py-2 shadow-sticker">
+              {auth.user.pictureUrl ? (
+                <img
+                  alt=""
+                  className="size-10 rounded-lg border-2 border-ink object-cover"
+                  src={auth.user.pictureUrl}
+                />
+              ) : (
+                <div className="flex size-10 items-center justify-center rounded-lg border-2 border-ink bg-sunny font-black">
+                  {displayName.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <p className="text-xs font-black uppercase text-teal">
+                  Signed in
+                </p>
+                <p className="font-black leading-tight">{displayName}</p>
+              </div>
+            </div>
+          ) : (
+            <a
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-ink bg-sunny px-4 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
+              href={auth.buildLoginUrl('/dashboard')}
+            >
+              Sign in
+            </a>
+          )}
         </div>
         <nav
           className="mx-auto flex w-full max-w-7xl gap-2 overflow-x-auto px-5 pb-5"
