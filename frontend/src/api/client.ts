@@ -201,6 +201,30 @@ export type EventAttendeeListResponse = {
   attendees: EventAttendee[];
 };
 
+export type EventCommentAuthor = {
+  sub: string;
+  email: string;
+  name: string | null;
+  picture_url: string | null;
+};
+
+export type EventCommentRecord = {
+  id: string;
+  event_id: string;
+  author: EventCommentAuthor;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventCommentListResponse = {
+  comments: EventCommentRecord[];
+};
+
+export type EventCommentCreateResponse = {
+  comment: EventCommentRecord;
+};
+
 export type EventRsvpUpdateRequest = {
   response: 'yes' | 'no' | 'maybe';
   note?: string | null;
@@ -360,6 +384,19 @@ class ApiClient {
   eventAttendees(eventId: string) {
     return this.get<EventAttendeeListResponse>(
       `/api/events/${encodeURIComponent(eventId)}/attendees`,
+    );
+  }
+
+  eventComments(eventId: string) {
+    return this.get<EventCommentListResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/comments`,
+    );
+  }
+
+  createEventComment(eventId: string, body: string) {
+    return this.post<EventCommentCreateResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/comments`,
+      { body },
     );
   }
 
