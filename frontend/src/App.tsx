@@ -1,3 +1,5 @@
+import { config } from './config';
+
 export function App() {
   return (
     <main className="app-shell">
@@ -20,6 +22,10 @@ export function App() {
           <div>
             <dt>API health</dt>
             <dd>/health</dd>
+          </div>
+          <div>
+            <dt>API base</dt>
+            <dd>{config.apiBaseUrl}</dd>
           </div>
         </dl>
       </section>
