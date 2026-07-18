@@ -1,18 +1,22 @@
 use std::net::SocketAddr;
 
-use axum::{routing::get, Json, Router};
+use alex_1883_gather_backend::{config::BackendConfig, db};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
+use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod config;
-
-use config::BackendConfig;
+#[derive(Clone)]
+struct AppState {
+    db_pool: PgPool,
+}
 
 #[derive(serde::Serialize)]
 struct HealthResponse {
     status: &'static str,
     service: &'static str,
+    database: &'static str,
 }
 
 #[tokio::main]
@@ -28,7 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = BackendConfig::from_env()?;
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
 
-    let app = app();
+    let db_pool = db::connect(&config.database).await?;
+    db::run_migrations(&db_pool).await?;
+    db::verify_connection(&db_pool).await?;
+
+    let app = app(AppState { db_pool });
     let listener = TcpListener::bind(addr).await?;
     tracing::info!(
         %addr,
@@ -44,17 +52,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn app() -> Router {
+fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
 
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
+async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, StatusCode> {
+    db::verify_connection(&state.db_pool)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "database health check failed");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+
+    Ok(Json(HealthResponse {
         status: "ok",
         service: "backend",
-    })
+        database: "ok",
+    }))
 }
 
 async fn shutdown_signal() {

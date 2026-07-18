@@ -49,14 +49,8 @@ pub struct AuthConfig {
 pub enum ConfigError {
     MissingVar(&'static str),
     EmptyVar(&'static str),
-    InvalidPort {
-        name: &'static str,
-        value: String,
-    },
-    InvalidUrl {
-        name: &'static str,
-        value: String,
-    },
+    InvalidPort { name: &'static str, value: String },
+    InvalidUrl { name: &'static str, value: String },
 }
 
 impl BackendConfig {
@@ -110,13 +104,23 @@ impl ServerConfig {
 impl fmt::Display for ConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingVar(name) => write!(formatter, "missing required environment variable {name}"),
-            Self::EmptyVar(name) => write!(formatter, "environment variable {name} must not be empty"),
+            Self::MissingVar(name) => {
+                write!(formatter, "missing required environment variable {name}")
+            }
+            Self::EmptyVar(name) => {
+                write!(formatter, "environment variable {name} must not be empty")
+            }
             Self::InvalidPort { name, value } => {
-                write!(formatter, "environment variable {name} is not a valid port: {value}")
+                write!(
+                    formatter,
+                    "environment variable {name} is not a valid port: {value}"
+                )
             }
             Self::InvalidUrl { name, value } => {
-                write!(formatter, "environment variable {name} must be an http(s) URL: {value}")
+                write!(
+                    formatter,
+                    "environment variable {name} must be an http(s) URL: {value}"
+                )
             }
         }
     }
