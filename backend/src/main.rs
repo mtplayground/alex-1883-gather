@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use alex_1883_gather_backend::{
+    activity::ActivityRepository,
     api::{self, AppState},
     auth::AuthVerifier,
     config::BackendConfig,
@@ -32,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::run_migrations(&db_pool).await?;
     db::verify_connection(&db_pool).await?;
     let email = EmailDispatcher::from_config(&config.email);
+    let activity = ActivityRepository::new(db_pool.clone());
     let events = EventRepository::new(db_pool.clone());
     let invitations = InvitationRepository::new(db_pool.clone());
     let storage = ObjectStorage::from_config(&config.object_storage);
@@ -45,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         auth,
+        activity,
         db_pool,
         email,
         events,

@@ -10,6 +10,7 @@ use tower_http::{
 };
 
 use crate::{
+    activity::{self, ActivityRepository},
     auth::{self, AuthVerifier},
     db,
     email::EmailDispatcher,
@@ -25,6 +26,7 @@ use error::{ApiError, ApiResult};
 #[derive(Clone)]
 pub struct AppState {
     pub auth: AuthVerifier,
+    pub activity: ActivityRepository,
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
     pub events: EventRepository,
@@ -96,6 +98,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/events/:event_id/attachments/:attachment_id/download",
             get(events::download_event_attachment),
+        )
+        .route(
+            "/api/events/:event_id/comments",
+            get(activity::list_event_comments).post(activity::create_event_comment),
+        )
+        .route(
+            "/api/events/:event_id/activity",
+            get(activity::list_event_activity),
         )
         .route(
             "/api/events/:event_id/invitations",

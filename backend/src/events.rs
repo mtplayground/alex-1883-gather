@@ -10,6 +10,7 @@ use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 
 use crate::{
+    activity::ACTIVITY_EVENT_EDITED,
     api::{
         error::{ApiError, ApiResult},
         validation::{require_max_len, require_non_empty, ValidateRequest, ValidationErrors},
@@ -626,12 +627,32 @@ pub async fn update_event(
         .ok_or_else(event_not_found)?;
     ensure_can_manage_event(&user, &existing)?;
 
+    let changed_fields = changed_event_fields(&existing, &draft);
     let event = state
         .events
         .update(&event_id, &draft)
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(event_not_found)?;
+
+    if !changed_fields.is_empty() {
+        let actor = display_name(&user);
+        let message = format!("{actor} updated the event.");
+
+        state
+            .activity
+            .record_activity(
+                &event.id,
+                Some(&user.sub),
+                ACTIVITY_EVENT_EDITED,
+                &message,
+                serde_json::json!({
+                    "changed_fields": changed_fields,
+                }),
+            )
+            .await
+            .map_err(ApiError::internal)?;
+    }
 
     Ok(Json(event))
 }
@@ -947,6 +968,42 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
     Ok(user)
 }
 
+fn changed_event_fields(existing: &Event, draft: &EventDraft) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+
+    if existing.title != draft.title.trim() {
+        fields.push("title");
+    }
+
+    if existing.description.as_deref().unwrap_or("").trim()
+        != draft.description.as_deref().unwrap_or("").trim()
+    {
+        fields.push("description");
+    }
+
+    if existing.starts_at != draft.starts_at {
+        fields.push("starts_at");
+    }
+
+    if existing.timezone.as_deref().unwrap_or("").trim()
+        != draft.timezone.as_deref().unwrap_or("").trim()
+    {
+        fields.push("timezone");
+    }
+
+    if existing
+        .cover_image_object_key
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        != draft.cover_image_object_key.as_deref().unwrap_or("").trim()
+    {
+        fields.push("cover_image_object_key");
+    }
+
+    fields
+}
+
 async fn ensure_can_read_event(
     events: &EventRepository,
     user: &CurrentUser,
@@ -979,6 +1036,15 @@ fn ensure_can_manage_event(user: &CurrentUser, event: &Event) -> ApiResult<()> {
         "event_forbidden",
         "only the organizer may edit or delete this event",
     ))
+}
+
+fn display_name(user: &CurrentUser) -> String {
+    user.name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| user.email.split('@').next())
+        .unwrap_or("The organizer")
+        .to_string()
 }
 
 fn ensure_can_remove_attachment(

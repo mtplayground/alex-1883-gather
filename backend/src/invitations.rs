@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use sqlx::{FromRow, PgPool};
 
 use crate::{
+    activity::ACTIVITY_RSVP_UPDATED,
     api::{
         error::{ApiError, ApiResult},
         validation::{require_max_len, require_non_empty, ValidateRequest, ValidationErrors},
@@ -420,9 +421,10 @@ impl InvitationRepository {
                 actor_sub,
                 activity_type,
                 message,
-                metadata
+                metadata,
+                payload
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
             "#,
         )
         .bind(id)
@@ -1036,7 +1038,7 @@ async fn record_rsvp_activity(
         .record_activity(
             event_id,
             &user.sub,
-            "rsvp.updated",
+            ACTIVITY_RSVP_UPDATED,
             &message,
             json!({
                 "response": response,
