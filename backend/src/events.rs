@@ -21,6 +21,9 @@ use crate::{
 
 const EVENT_COVER_IMAGE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const EVENT_COVER_IMAGE_URL_TTL: Duration = Duration::from_secs(60 * 60);
+const EVENT_ATTACHMENT_MAX_BYTES: usize = 25 * 1024 * 1024;
+const EVENT_ATTACHMENT_URL_TTL: Duration = Duration::from_secs(60 * 60);
+const PDF_CONTENT_TYPE: &str = "application/pdf";
 
 #[derive(Clone, Debug, serde::Serialize, FromRow)]
 pub struct Event {
@@ -85,6 +88,23 @@ pub struct EventCoverImageResponse {
     pub event: Event,
     pub object_key: String,
     pub content_type: String,
+    pub access_url: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EventAttachmentListResponse {
+    pub attachments: Vec<EventAttachment>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EventAttachmentUploadResponse {
+    pub attachment: EventAttachment,
+    pub access_url: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EventAttachmentDownloadResponse {
+    pub attachment: EventAttachment,
     pub access_url: String,
 }
 
@@ -283,6 +303,126 @@ impl EventRepository {
 
         Ok(result.rows_affected() > 0)
     }
+
+    pub async fn create_attachment(
+        &self,
+        event_id: &str,
+        uploaded_by_sub: &str,
+        draft: &EventAttachmentDraft,
+    ) -> Result<EventAttachment, sqlx::Error> {
+        let id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query_as::<_, EventAttachment>(
+            r#"
+            INSERT INTO event_attachments (
+                id,
+                event_id,
+                uploaded_by_sub,
+                object_key,
+                filename,
+                content_type,
+                byte_size,
+                page_count,
+                metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING
+                id,
+                event_id,
+                uploaded_by_sub,
+                object_key,
+                filename,
+                content_type,
+                byte_size,
+                page_count,
+                metadata,
+                created_at,
+                updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(event_id)
+        .bind(uploaded_by_sub)
+        .bind(&draft.object_key)
+        .bind(&draft.filename)
+        .bind(&draft.content_type)
+        .bind(draft.byte_size)
+        .bind(draft.page_count)
+        .bind(draft.metadata.clone())
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn list_attachments(
+        &self,
+        event_id: &str,
+    ) -> Result<Vec<EventAttachment>, sqlx::Error> {
+        sqlx::query_as::<_, EventAttachment>(
+            r#"
+            SELECT
+                id,
+                event_id,
+                uploaded_by_sub,
+                object_key,
+                filename,
+                content_type,
+                byte_size,
+                page_count,
+                metadata,
+                created_at,
+                updated_at
+            FROM event_attachments
+            WHERE event_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(event_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_attachment(
+        &self,
+        event_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<EventAttachment>, sqlx::Error> {
+        sqlx::query_as::<_, EventAttachment>(
+            r#"
+            SELECT
+                id,
+                event_id,
+                uploaded_by_sub,
+                object_key,
+                filename,
+                content_type,
+                byte_size,
+                page_count,
+                metadata,
+                created_at,
+                updated_at
+            FROM event_attachments
+            WHERE event_id = $1 AND id = $2
+            "#,
+        )
+        .bind(event_id)
+        .bind(attachment_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn delete_attachment(
+        &self,
+        event_id: &str,
+        attachment_id: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM event_attachments WHERE event_id = $1 AND id = $2")
+            .bind(event_id)
+            .bind(attachment_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 pub async fn list_events(
@@ -449,6 +589,161 @@ pub async fn upload_event_cover_image(
     }))
 }
 
+pub async fn list_event_attachments(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(event_id): Path<String>,
+) -> ApiResult<Json<EventAttachmentListResponse>> {
+    let user = require_current_user(user)?;
+    let event = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(event_not_found)?;
+    ensure_can_read_event(&state.events, &user, &event).await?;
+
+    let attachments = state
+        .events
+        .list_attachments(&event_id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(EventAttachmentListResponse { attachments }))
+}
+
+pub async fn upload_event_attachment(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(event_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<EventAttachmentUploadResponse>)> {
+    let user = require_current_user(user)?;
+    let event = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(event_not_found)?;
+    ensure_can_read_event(&state.events, &user, &event).await?;
+
+    let upload = read_event_attachment(&event_id, &mut multipart).await?;
+    let object_key = state
+        .storage
+        .put_object(&upload.raw_key, upload.bytes, Some(PDF_CONTENT_TYPE))
+        .await
+        .map_err(ApiError::internal)?;
+    let draft = EventAttachmentDraft {
+        object_key: object_key.clone(),
+        filename: upload.filename,
+        content_type: PDF_CONTENT_TYPE.to_string(),
+        byte_size: upload.byte_size,
+        page_count: None,
+        metadata: serde_json::json!({}),
+    };
+    draft.validate().map_err(ApiError::validation)?;
+
+    let attachment = match state
+        .events
+        .create_attachment(&event_id, &user.sub, &draft)
+        .await
+    {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            if let Err(delete_error) = state.storage.delete_object_key(&object_key).await {
+                tracing::warn!(%delete_error, object_key, "failed to delete orphaned event attachment");
+            }
+            return Err(ApiError::internal(error));
+        }
+    };
+    let access_url = state
+        .storage
+        .presigned_get_url_for_object_key(&attachment.object_key, EVENT_ATTACHMENT_URL_TTL)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(EventAttachmentUploadResponse {
+            attachment,
+            access_url,
+        }),
+    ))
+}
+
+pub async fn download_event_attachment(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path((event_id, attachment_id)): Path<(String, String)>,
+) -> ApiResult<Json<EventAttachmentDownloadResponse>> {
+    let user = require_current_user(user)?;
+    let event = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(event_not_found)?;
+    ensure_can_read_event(&state.events, &user, &event).await?;
+
+    let attachment = state
+        .events
+        .get_attachment(&event_id, &attachment_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(attachment_not_found)?;
+    let access_url = state
+        .storage
+        .presigned_get_url_for_object_key(&attachment.object_key, EVENT_ATTACHMENT_URL_TTL)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(EventAttachmentDownloadResponse {
+        attachment,
+        access_url,
+    }))
+}
+
+pub async fn delete_event_attachment(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path((event_id, attachment_id)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    let user = require_current_user(user)?;
+    let event = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(event_not_found)?;
+    let attachment = state
+        .events
+        .get_attachment(&event_id, &attachment_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(attachment_not_found)?;
+    ensure_can_remove_attachment(&user, &event, &attachment)?;
+
+    state
+        .events
+        .delete_attachment(&event_id, &attachment_id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if let Err(error) = state
+        .storage
+        .delete_object_key(&attachment.object_key)
+        .await
+    {
+        tracing::warn!(
+            %error,
+            object_key = attachment.object_key,
+            "failed to delete event attachment object"
+        );
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 impl ValidateRequest for EventDraft {
     fn validate(&self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
@@ -551,6 +846,21 @@ fn ensure_can_manage_event(user: &CurrentUser, event: &Event) -> ApiResult<()> {
     ))
 }
 
+fn ensure_can_remove_attachment(
+    user: &CurrentUser,
+    event: &Event,
+    attachment: &EventAttachment,
+) -> ApiResult<()> {
+    if user_can_manage_event(user, event) || attachment.uploaded_by_sub == user.sub {
+        return Ok(());
+    }
+
+    Err(ApiError::forbidden(
+        "attachment_forbidden",
+        "only the organizer or uploader may remove this attachment",
+    ))
+}
+
 fn user_owns_event(user: &CurrentUser, event: &Event) -> bool {
     user.sub == event.owner_sub
 }
@@ -561,6 +871,10 @@ fn user_can_manage_event(user: &CurrentUser, event: &Event) -> bool {
 
 fn event_not_found() -> ApiError {
     ApiError::not_found("event_not_found", "event not found")
+}
+
+fn attachment_not_found() -> ApiError {
+    ApiError::not_found("attachment_not_found", "attachment not found")
 }
 
 struct EventCoverImageUpload {
@@ -631,6 +945,115 @@ fn event_cover_image_key(event_id: &str, extension: &str) -> String {
     )
 }
 
+struct EventAttachmentUpload {
+    bytes: Vec<u8>,
+    raw_key: String,
+    filename: String,
+    byte_size: i64,
+}
+
+async fn read_event_attachment(
+    event_id: &str,
+    multipart: &mut Multipart,
+) -> ApiResult<EventAttachmentUpload> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| ApiError::bad_request("invalid_upload", "invalid multipart upload"))?
+    {
+        let field_name = field.name().unwrap_or_default().to_string();
+        if field_name != "attachment" && field_name != "file" {
+            continue;
+        }
+
+        if field.content_type() != Some(PDF_CONTENT_TYPE) {
+            return Err(ApiError::bad_request(
+                "unsupported_attachment_type",
+                "event attachment must be a PDF file",
+            ));
+        }
+
+        let filename = normalize_pdf_filename(field.file_name());
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|_| ApiError::bad_request("invalid_upload", "invalid PDF upload"))?
+            .to_vec();
+
+        if bytes.is_empty() {
+            return Err(ApiError::bad_request(
+                "empty_upload",
+                "event attachment must not be empty",
+            ));
+        }
+
+        if bytes.len() > EVENT_ATTACHMENT_MAX_BYTES {
+            return Err(ApiError::bad_request(
+                "upload_too_large",
+                "event attachment must be 25 MB or smaller",
+            ));
+        }
+
+        if !looks_like_pdf(&bytes) {
+            return Err(ApiError::bad_request(
+                "invalid_pdf",
+                "event attachment must be a valid PDF file",
+            ));
+        }
+
+        let raw_key = event_attachment_key(event_id, &filename);
+
+        return Ok(EventAttachmentUpload {
+            byte_size: bytes.len() as i64,
+            bytes,
+            raw_key,
+            filename,
+        });
+    }
+
+    Err(ApiError::bad_request(
+        "missing_attachment",
+        "multipart upload must include a PDF attachment file",
+    ))
+}
+
+fn event_attachment_key(event_id: &str, filename: &str) -> String {
+    format!(
+        "events/{}/attachments/{}-{}",
+        safe_key_part(event_id),
+        uuid::Uuid::new_v4(),
+        safe_key_part(filename)
+    )
+}
+
+fn normalize_pdf_filename(file_name: Option<&str>) -> String {
+    let name = file_name
+        .and_then(|file_name| file_name.rsplit(['/', '\\']).next())
+        .unwrap_or_default()
+        .trim();
+    let name = if name.is_empty() {
+        "attachment.pdf".to_string()
+    } else {
+        name.to_string()
+    };
+    let name = if name.to_ascii_lowercase().ends_with(".pdf") {
+        name
+    } else {
+        format!("{name}.pdf")
+    };
+
+    if name.len() <= 255 {
+        return name;
+    }
+
+    let stem: String = name.chars().take(251).collect();
+    format!("{stem}.pdf")
+}
+
+fn looks_like_pdf(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"%PDF-")
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
@@ -639,8 +1062,9 @@ mod tests {
     use crate::auth::CurrentUser;
 
     use super::{
-        event_cover_image_key, user_can_manage_event, user_owns_event, Event, EventAttachmentDraft,
-        EventDraft,
+        event_attachment_key, event_cover_image_key, looks_like_pdf, normalize_pdf_filename,
+        user_can_manage_event, user_owns_event, Event, EventAttachment, EventAttachmentDraft,
+        EventDraft, PDF_CONTENT_TYPE,
     };
 
     #[test]
@@ -696,6 +1120,47 @@ mod tests {
         assert!(key.ends_with(".png"));
     }
 
+    #[test]
+    fn attachment_key_sanitizes_event_id_and_filename() {
+        let key = event_attachment_key("event/../../1", "../timeline.pdf");
+
+        assert!(key.starts_with("events/event_______1/attachments/"));
+        assert!(key.ends_with("-___timeline_pdf"));
+    }
+
+    #[test]
+    fn pdf_filename_normalization_is_stable() {
+        assert_eq!(
+            normalize_pdf_filename(Some("../Floor Plan")),
+            "Floor Plan.pdf"
+        );
+        assert_eq!(normalize_pdf_filename(None), "attachment.pdf");
+    }
+
+    #[test]
+    fn pdf_header_validation_checks_magic_bytes() {
+        assert!(looks_like_pdf(b"%PDF-1.7\n"));
+        assert!(!looks_like_pdf(b"not a pdf"));
+    }
+
+    #[test]
+    fn uploader_can_remove_own_attachment() {
+        let user = test_user("member-sub");
+        let event = test_event("organizer-sub");
+        let attachment = test_attachment("member-sub");
+
+        assert!(super::ensure_can_remove_attachment(&user, &event, &attachment).is_ok());
+    }
+
+    #[test]
+    fn unrelated_user_cannot_remove_attachment() {
+        let user = test_user("other-sub");
+        let event = test_event("organizer-sub");
+        let attachment = test_attachment("member-sub");
+
+        assert!(super::ensure_can_remove_attachment(&user, &event, &attachment).is_err());
+    }
+
     fn test_user(sub: &str) -> CurrentUser {
         CurrentUser {
             sub: sub.to_string(),
@@ -718,6 +1183,24 @@ mod tests {
             starts_at: now,
             timezone: Some("UTC".to_string()),
             cover_image_object_key: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_attachment(uploaded_by_sub: &str) -> EventAttachment {
+        let now = Utc::now();
+
+        EventAttachment {
+            id: "attachment-1".to_string(),
+            event_id: "event-1".to_string(),
+            uploaded_by_sub: uploaded_by_sub.to_string(),
+            object_key: "events/event-1/attachments/attachment-1-menu_pdf".to_string(),
+            filename: "menu.pdf".to_string(),
+            content_type: PDF_CONTENT_TYPE.to_string(),
+            byte_size: 1024,
+            page_count: None,
+            metadata: serde_json::json!({}),
             created_at: now,
             updated_at: now,
         }

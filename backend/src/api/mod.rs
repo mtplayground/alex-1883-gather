@@ -83,6 +83,18 @@ pub fn router(state: AppState) -> Router {
                 .put(events::upload_event_cover_image),
         )
         .route(
+            "/api/events/:event_id/attachments",
+            get(events::list_event_attachments).post(events::upload_event_attachment),
+        )
+        .route(
+            "/api/events/:event_id/attachments/:attachment_id",
+            axum::routing::delete(events::delete_event_attachment),
+        )
+        .route(
+            "/api/events/:event_id/attachments/:attachment_id/download",
+            get(events::download_event_attachment),
+        )
+        .route(
             "/api/profile",
             get(profile::get_current_profile).put(profile::update_current_profile),
         )
