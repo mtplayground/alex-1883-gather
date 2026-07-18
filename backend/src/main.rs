@@ -8,6 +8,7 @@ use alex_1883_gather_backend::{
     email::EmailDispatcher,
     events::EventRepository,
     invitations::InvitationRepository,
+    reminders,
     storage::ObjectStorage,
     users::UserRepository,
 };
@@ -36,6 +37,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = ObjectStorage::from_config(&config.object_storage);
     let users = UserRepository::new(db_pool.clone());
     let auth = AuthVerifier::from_config(&config.auth);
+    reminders::spawn_scheduler(
+        db_pool.clone(),
+        email.clone(),
+        config.server.self_url.clone(),
+    );
 
     let state = AppState {
         auth,

@@ -319,6 +319,41 @@ pub mod templates {
         body
     }
 
+    pub fn event_reminder_html(
+        event_title: &str,
+        recipient_name: &str,
+        starts_at: &str,
+        event_url: &str,
+    ) -> String {
+        let event_title = escape_html(event_title);
+        let recipient_name = escape_html(recipient_name);
+        let starts_at = escape_html(starts_at);
+        let event_url = escape_html(event_url);
+
+        format!(
+            r#"<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+    <h1 style="font-size: 20px;">Your event is coming up</h1>
+    <p>Hi {recipient_name}, {event_title} is scheduled for {starts_at}.</p>
+    <p><a href="{event_url}" style="color: #0f766e; font-weight: bold;">Open the event details</a></p>
+    <p style="color: #6b7280; font-size: 13px;">A quick reminder so you have the details close by.</p>
+  </body>
+</html>"#
+        )
+    }
+
+    pub fn event_reminder_text(
+        event_title: &str,
+        recipient_name: &str,
+        starts_at: &str,
+        event_url: &str,
+    ) -> String {
+        format!(
+            "Hi {recipient_name}, {event_title} is scheduled for {starts_at}.\n\nOpen the event details: {event_url}"
+        )
+    }
+
     fn escape_html(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -369,6 +404,21 @@ mod tests {
 
         assert!(html.contains("&lt;Launch&gt;"));
         assert!(html.contains("See &lt;you&gt; there"));
+    }
+
+    #[test]
+    fn reminder_template_escapes_event_details() {
+        let html = templates::event_reminder_html(
+            "<Launch>",
+            "Alex & Sam",
+            "Jul 18 at <noon>",
+            "https://example.com/events/1?x=<y>",
+        );
+
+        assert!(html.contains("&lt;Launch&gt;"));
+        assert!(html.contains("Alex &amp; Sam"));
+        assert!(html.contains("Jul 18 at &lt;noon&gt;"));
+        assert!(html.contains("&lt;y&gt;"));
     }
 
     #[test]
