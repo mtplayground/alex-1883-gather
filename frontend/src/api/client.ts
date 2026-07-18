@@ -77,6 +77,24 @@ export type ProfilePhotoResponse = {
   access_url: string;
 };
 
+export type DashboardEventSummary = {
+  id: string;
+  owner_sub: string;
+  title: string;
+  description: string | null;
+  starts_at: string;
+  timezone: string | null;
+  cover_image_object_key: string | null;
+  cover_image_url: string | null;
+  relationship: 'organizer' | 'joined' | 'invited' | string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DashboardEventsResponse = {
+  events: DashboardEventSummary[];
+};
+
 class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -130,6 +148,13 @@ class ApiClient {
     form.set('photo', file);
 
     return this.postForm<ProfilePhotoResponse>('/api/profile/photo', form);
+  }
+
+  dashboardEvents(limit = 24) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return this.get<DashboardEventsResponse>(
+      `/api/dashboard/events?${params.toString()}`,
+    );
   }
 
   private async get<T>(path: string): Promise<T> {
