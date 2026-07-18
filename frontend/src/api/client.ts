@@ -40,6 +40,43 @@ export type PasswordResetResponse = {
   email_delivery: EmailDelivery;
 };
 
+export type AccountSettingsResponse = {
+  sub: string;
+  email: string;
+  email_verified: boolean;
+  name: string | null;
+  picture_url: string | null;
+  created_at: string;
+  last_seen_at: string;
+};
+
+export type ProfileRecord = {
+  user_sub: string;
+  display_name: string;
+  photo_object_key: string | null;
+  bio: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProfileResponse = {
+  account: AccountSettingsResponse;
+  profile: ProfileRecord;
+};
+
+export type ProfileUpdateRequest = {
+  display_name: string;
+  photo_object_key?: string | null;
+  bio?: string | null;
+};
+
+export type ProfilePhotoResponse = {
+  profile: ProfileRecord;
+  object_key: string;
+  content_type: string;
+  access_url: string;
+};
+
 class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -80,6 +117,21 @@ class ApiClient {
     return this.authRedirectUrl('/api/auth/google', returnPath);
   }
 
+  profile() {
+    return this.get<ProfileResponse>('/api/profile');
+  }
+
+  updateProfile(update: ProfileUpdateRequest) {
+    return this.put<ProfileResponse>('/api/profile', update);
+  }
+
+  uploadProfilePhoto(file: File) {
+    const form = new FormData();
+    form.set('photo', file);
+
+    return this.postForm<ProfilePhotoResponse>('/api/profile/photo', form);
+  }
+
   private async get<T>(path: string): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       credentials: 'include',
@@ -102,6 +154,37 @@ class ApiClient {
         'Content-Type': 'application/json',
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+    await this.ensureOk(response);
+
+    return response.json() as Promise<T>;
+  }
+
+  private async put<T>(path: string, body: unknown): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    await this.ensureOk(response);
+
+    return response.json() as Promise<T>;
+  }
+
+  private async postForm<T>(path: string, body: FormData): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+      body,
     });
 
     await this.ensureOk(response);
