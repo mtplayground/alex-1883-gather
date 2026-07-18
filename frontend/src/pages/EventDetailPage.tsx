@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import {
   apiClient,
+  type EventActivityRecord,
   type DashboardEventSummary,
   type EventAttachmentRecord,
   type EventAttendee,
@@ -18,6 +19,7 @@ type EventDetailState =
       status: 'loading';
       event: null;
       attachments: EventAttachmentRecord[];
+      activity: EventActivityRecord[];
       attendees: EventAttendee[];
       comments: EventCommentRecord[];
       dashboardEvent: null;
@@ -27,6 +29,7 @@ type EventDetailState =
       status: 'ready';
       event: EventRecord;
       attachments: EventAttachmentRecord[];
+      activity: EventActivityRecord[];
       attendees: EventAttendee[];
       comments: EventCommentRecord[];
       dashboardEvent: DashboardEventSummary | null;
@@ -36,6 +39,7 @@ type EventDetailState =
       status: 'error';
       event: null;
       attachments: EventAttachmentRecord[];
+      activity: EventActivityRecord[];
       attendees: EventAttendee[];
       comments: EventCommentRecord[];
       dashboardEvent: null;
@@ -57,6 +61,7 @@ export function EventDetailPage() {
     status: 'loading',
     event: null,
     attachments: [],
+    activity: [],
     attendees: [],
     comments: [],
     dashboardEvent: null,
@@ -95,15 +100,19 @@ export function EventDetailPage() {
 
     async function loadEventDetail() {
       try {
-        const [event, attachmentResponse, dashboardResponse, commentResponse] =
-          await Promise.all([
-            apiClient.event(currentEventId),
-            apiClient.eventAttachments(currentEventId),
-            apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
-            apiClient
-              .eventComments(currentEventId)
-              .catch(() => ({ comments: [] })),
-          ]);
+        const [
+          event,
+          attachmentResponse,
+          dashboardResponse,
+          commentResponse,
+          activityResponse,
+        ] = await Promise.all([
+          apiClient.event(currentEventId),
+          apiClient.eventAttachments(currentEventId),
+          apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
+          apiClient.eventComments(currentEventId).catch(() => ({ comments: [] })),
+          apiClient.eventActivity(currentEventId).catch(() => ({ activity: [] })),
+        ]);
 
         const attendees = await apiClient
           .eventAttendees(event.id)
@@ -128,6 +137,7 @@ export function EventDetailPage() {
           status: 'ready',
           event,
           attachments: attachmentResponse.attachments,
+          activity: activityResponse.activity,
           attendees,
           comments: commentResponse.comments,
           dashboardEvent:
@@ -144,6 +154,7 @@ export function EventDetailPage() {
           status: 'error',
           event: null,
           attachments: [],
+          activity: [],
           attendees: [],
           comments: [],
           dashboardEvent: null,
@@ -161,27 +172,6 @@ export function EventDetailPage() {
       cancelled = true;
     };
   }, [eventId, auth.user]);
-
-  const activityItems = useMemo(() => {
-    if (detail.status !== 'ready') {
-      return [];
-    }
-
-    return [
-      {
-        label: 'Updated',
-        value: formatShortDate(detail.event.updated_at),
-      },
-      {
-        label: 'Created',
-        value: formatShortDate(detail.event.created_at),
-      },
-      {
-        label: 'Files',
-        value: String(detail.attachments.length),
-      },
-    ];
-  }, [detail]);
 
   if (!eventId) {
     return (
@@ -349,11 +339,15 @@ export function EventDetailPage() {
       const attendeeResponse = await apiClient
         .eventAttendees(currentEvent.id)
         .catch(() => ({ attendees: currentAttendees }));
+      const activityResponse = await apiClient
+        .eventActivity(currentEvent.id)
+        .catch(() => null);
 
       setDetail((current) =>
         current.status === 'ready'
           ? {
               ...current,
+              ...(activityResponse ? { activity: activityResponse.activity } : {}),
               attendees: attendeeResponse.attendees,
               dashboardEvent: current.dashboardEvent
                 ? {
@@ -401,10 +395,14 @@ export function EventDetailPage() {
 
     try {
       const response = await apiClient.createEventComment(detail.event.id, body);
+      const activityResponse = await apiClient
+        .eventActivity(detail.event.id)
+        .catch(() => null);
       setDetail((current) =>
         current.status === 'ready'
           ? {
               ...current,
+              ...(activityResponse ? { activity: activityResponse.activity } : {}),
               comments: [...current.comments, response.comment],
             }
           : current,
@@ -570,22 +568,7 @@ export function EventDetailPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <section className="rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
-          <p className="text-sm font-black uppercase text-teal">Activity</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-1">
-            {activityItems.map((item) => (
-              <div
-                className="rounded-lg border-2 border-ink bg-mint p-4"
-                key={item.label}
-              >
-                <p className="text-xs font-black uppercase text-slate-600">
-                  {item.label}
-                </p>
-                <p className="mt-2 text-xl font-black">{item.value}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        <ActivityFeed activity={detail.activity} event={detail.event} />
 
         <CommentThread
           celebratedCommentId={celebratedCommentId}
@@ -862,6 +845,95 @@ function MemberRsvpPanel({
   );
 }
 
+function ActivityFeed({
+  activity,
+  event,
+}: {
+  activity: EventActivityRecord[];
+  event: EventRecord;
+}) {
+  return (
+    <section className="rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black uppercase text-teal">Activity</p>
+          <h3 className="mt-1 text-3xl font-black">Latest buzz</h3>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-mint px-3 py-2 text-sm font-black shadow-sticker">
+          {activity.length} update{activity.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+        <div className="rounded-lg border-2 border-ink bg-paper p-3">
+          <p className="text-xs font-black uppercase text-slate-600">Edited</p>
+          <p className="mt-1 font-black">{formatShortDate(event.updated_at)}</p>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-sunny p-3">
+          <p className="text-xs font-black uppercase text-slate-600">Opened</p>
+          <p className="mt-1 font-black">{formatShortDate(event.created_at)}</p>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-coral p-3 text-white">
+          <p className="text-xs font-black uppercase text-white/80">Feed</p>
+          <p className="mt-1 font-black">{activity.length ? 'Live' : 'Quiet'}</p>
+        </div>
+      </div>
+
+      {activity.length > 0 ? (
+        <ol className="mt-5 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+          {activity.map((item) => (
+            <li className="relative flex gap-3" key={item.id}>
+              <div
+                className={`mt-1 flex size-11 shrink-0 items-center justify-center rounded-lg border-2 border-ink text-sm font-black shadow-sticker ${activityBadgeClass(
+                  item.activity_type,
+                )}`}
+              >
+                {activityGlyph(item.activity_type)}
+              </div>
+              <div className="min-w-0 flex-1 rounded-lg border-2 border-ink bg-paper px-4 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <p className="font-black">{activityTitle(item)}</p>
+                  <p className="text-xs font-bold text-slate-500">
+                    {formatActivityTime(item.created_at)}
+                  </p>
+                </div>
+                <p className="mt-1 break-words text-slate-700">
+                  {activityMessage(item)}
+                </p>
+                {item.actor ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    {item.actor.picture_url ? (
+                      <img
+                        alt=""
+                        className="size-7 rounded-lg border-2 border-ink object-cover"
+                        src={item.actor.picture_url}
+                      />
+                    ) : (
+                      <div className="flex size-7 items-center justify-center rounded-lg border-2 border-ink bg-white text-xs font-black">
+                        {activityActorName(item).slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <p className="min-w-0 truncate text-sm font-bold text-slate-600">
+                      {activityActorName(item)}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="mt-5 rounded-lg border-2 border-ink bg-paper p-4">
+          <p className="font-black">Nothing new yet</p>
+          <p className="mt-1 text-slate-700">
+            RSVP updates, comments, and edits will land here.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function CommentThread({
   celebratedCommentId,
   comments,
@@ -1116,6 +1188,16 @@ function formatCommentTime(value: string) {
   }).format(new Date(value));
 }
 
+function formatActivityTime(value: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -1224,6 +1306,75 @@ function commentAuthorName(comment: EventCommentRecord) {
     comment.author.sub ||
     'Guest'
   );
+}
+
+function activityActorName(activity: EventActivityRecord) {
+  return (
+    activity.actor?.name?.trim() ||
+    activity.actor?.email?.split('@')[0] ||
+    activity.actor?.sub ||
+    'Someone'
+  );
+}
+
+function activityTitle(activity: EventActivityRecord) {
+  switch (activity.activity_type) {
+    case 'rsvp.updated':
+      return 'RSVP update';
+    case 'comment.created':
+      return 'New comment';
+    case 'event.edited':
+      return 'Event edit';
+    default:
+      return 'Update';
+  }
+}
+
+function activityMessage(activity: EventActivityRecord) {
+  const message = activity.message.trim();
+
+  if (message) {
+    return message;
+  }
+
+  const actor = activityActorName(activity);
+
+  switch (activity.activity_type) {
+    case 'rsvp.updated':
+      return `${actor} updated their RSVP.`;
+    case 'comment.created':
+      return `${actor} added a comment.`;
+    case 'event.edited':
+      return `${actor} updated the event details.`;
+    default:
+      return `${actor} shared an update.`;
+  }
+}
+
+function activityGlyph(activityType: string) {
+  switch (activityType) {
+    case 'rsvp.updated':
+      return 'RSVP';
+    case 'comment.created':
+      return '+';
+    case 'event.edited':
+      return 'Edit';
+    default:
+      return 'New';
+  }
+}
+
+function activityBadgeClass(activityType: string) {
+  switch (activityType) {
+    case 'rsvp.updated':
+      return 'bg-mint';
+    case 'comment.created':
+      return 'bg-sunny';
+    case 'event.edited':
+      return 'bg-teal text-white';
+    default:
+      return 'bg-white';
+  }
 }
 
 function attendeeStatusLabel(attendee: EventAttendee) {

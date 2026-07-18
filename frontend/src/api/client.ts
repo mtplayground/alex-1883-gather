@@ -225,6 +225,27 @@ export type EventCommentCreateResponse = {
   comment: EventCommentRecord;
 };
 
+export type EventActivityActor = {
+  sub: string;
+  email: string | null;
+  name: string | null;
+  picture_url: string | null;
+};
+
+export type EventActivityRecord = {
+  id: string;
+  event_id: string;
+  actor: EventActivityActor | null;
+  activity_type: string;
+  message: string;
+  payload: unknown;
+  created_at: string;
+};
+
+export type EventActivityListResponse = {
+  activity: EventActivityRecord[];
+};
+
 export type EventRsvpUpdateRequest = {
   response: 'yes' | 'no' | 'maybe';
   note?: string | null;
@@ -397,6 +418,12 @@ class ApiClient {
     return this.post<EventCommentCreateResponse>(
       `/api/events/${encodeURIComponent(eventId)}/comments`,
       { body },
+    );
+  }
+
+  eventActivity(eventId: string) {
+    return this.get<EventActivityListResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/activity`,
     );
   }
 
