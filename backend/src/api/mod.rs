@@ -65,6 +65,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/auth/register", axum::routing::post(auth::register))
         .route("/api/auth/verify", get(auth::verify))
+        .route("/api/dashboard/events", get(events::dashboard_events))
         .route("/api/health", get(health))
         .route("/api/me", get(auth::me))
         .route(
