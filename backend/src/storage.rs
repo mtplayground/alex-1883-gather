@@ -24,6 +24,12 @@ pub struct StoredObject {
     pub content_type: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageContentType {
+    pub content_type: &'static str,
+    pub extension: &'static str,
+}
+
 impl ObjectStorage {
     pub fn from_config(config: &ObjectStorageConfig) -> Self {
         let credentials = SharedCredentialsProvider::new(Credentials::new(
@@ -147,4 +153,81 @@ impl ObjectStorage {
 
 fn normalize_prefix(prefix: &str) -> String {
     prefix.trim_matches('/').to_string()
+}
+
+pub fn standard_image_type(content_type: &str) -> Option<ImageContentType> {
+    match content_type {
+        "image/jpeg" | "image/jpg" => Some(ImageContentType {
+            content_type: "image/jpeg",
+            extension: "jpg",
+        }),
+        "image/png" => Some(ImageContentType {
+            content_type: "image/png",
+            extension: "png",
+        }),
+        "image/webp" => Some(ImageContentType {
+            content_type: "image/webp",
+            extension: "webp",
+        }),
+        "image/gif" => Some(ImageContentType {
+            content_type: "image/gif",
+            extension: "gif",
+        }),
+        _ => None,
+    }
+}
+
+pub fn safe_key_part(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{safe_key_part, standard_image_type, ImageContentType};
+
+    #[test]
+    fn standard_image_type_accepts_common_web_images() {
+        assert_eq!(
+            standard_image_type("image/jpeg"),
+            Some(ImageContentType {
+                content_type: "image/jpeg",
+                extension: "jpg",
+            })
+        );
+        assert_eq!(
+            standard_image_type("image/png"),
+            Some(ImageContentType {
+                content_type: "image/png",
+                extension: "png",
+            })
+        );
+        assert_eq!(
+            standard_image_type("image/webp"),
+            Some(ImageContentType {
+                content_type: "image/webp",
+                extension: "webp",
+            })
+        );
+        assert_eq!(
+            standard_image_type("image/gif"),
+            Some(ImageContentType {
+                content_type: "image/gif",
+                extension: "gif",
+            })
+        );
+    }
+
+    #[test]
+    fn safe_key_part_replaces_path_separators() {
+        assert_eq!(safe_key_part("user|abc/123"), "user_abc_123");
+    }
 }
