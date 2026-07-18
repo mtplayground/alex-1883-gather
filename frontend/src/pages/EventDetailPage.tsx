@@ -6,6 +6,7 @@ import {
   type DashboardEventSummary,
   type EventAttachmentRecord,
   type EventAttendee,
+  type EventRsvpUpdateRequest,
   type EventRecord,
   type InvitationEmailDelivery,
 } from '../api/client';
@@ -41,6 +42,8 @@ type InviteFeedback =
   | { tone: 'success' | 'error'; message: string; deliveries: InvitationEmailDelivery[] }
   | null;
 
+type RsvpFeedback = { tone: 'success' | 'error'; message: string } | null;
+
 export function EventDetailPage() {
   const { eventId } = useParams();
   const auth = useAuth();
@@ -60,10 +63,16 @@ export function EventDetailPage() {
   const [inviteMessage, setInviteMessage] = useState('');
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteFeedback, setInviteFeedback] = useState<InviteFeedback>(null);
+  const [rsvpChoice, setRsvpChoice] =
+    useState<EventRsvpUpdateRequest['response']>('maybe');
+  const [rsvpNote, setRsvpNote] = useState('');
+  const [rsvpSaving, setRsvpSaving] = useState(false);
+  const [rsvpFeedback, setRsvpFeedback] = useState<RsvpFeedback>(null);
+  const [rsvpCelebrating, setRsvpCelebrating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const currentUserSub = auth.user?.sub;
+    const currentUser = auth.user;
 
     const currentEventId = eventId ?? '';
 
@@ -82,16 +91,23 @@ export function EventDetailPage() {
             apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
           ]);
 
-        const attendees =
-          currentUserSub && event.owner_sub === currentUserSub
-            ? await apiClient
-                .eventAttendees(event.id)
-                .then((response) => response.attendees)
-                .catch(() => [])
-            : [];
+        const attendees = await apiClient
+          .eventAttendees(event.id)
+          .then((response) => response.attendees)
+          .catch(() => []);
 
         if (cancelled) {
           return;
+        }
+
+        const attendee =
+          currentUser === null
+            ? null
+            : findCurrentAttendee(attendees, currentUser.sub, currentUser.email);
+
+        if (attendee) {
+          setRsvpChoice(toRsvpChoice(attendee));
+          setRsvpNote(attendee.rsvp_note ?? '');
         }
 
         setDetail({
@@ -128,7 +144,7 @@ export function EventDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [eventId, auth.user?.sub]);
+  }, [eventId, auth.user]);
 
   const activityItems = useMemo(() => {
     if (detail.status !== 'ready') {
@@ -197,6 +213,7 @@ export function EventDetailPage() {
   );
   const isOrganizer = detail.event.owner_sub === auth.user?.sub;
   const attendeeCounts = countAttendeeStatuses(detail.attendees);
+  const socialAttendees = socialAttendeeList(detail.attendees);
 
   async function downloadAttachment(attachment: EventAttachmentRecord) {
     if (!eventId) {
@@ -297,6 +314,60 @@ export function EventDetailPage() {
     }
   }
 
+  async function saveRsvp() {
+    if (detail.status !== 'ready') {
+      return;
+    }
+
+    const currentEvent = detail.event;
+    const currentAttendees = detail.attendees;
+
+    setRsvpSaving(true);
+    setRsvpFeedback(null);
+
+    try {
+      await apiClient.updateEventRsvp(currentEvent.id, {
+        response: rsvpChoice,
+        note: rsvpNote.trim() ? rsvpNote.trim() : null,
+      });
+      const attendeeResponse = await apiClient
+        .eventAttendees(currentEvent.id)
+        .catch(() => ({ attendees: currentAttendees }));
+
+      setDetail((current) =>
+        current.status === 'ready'
+          ? {
+              ...current,
+              attendees: attendeeResponse.attendees,
+              dashboardEvent: current.dashboardEvent
+                ? {
+                    ...current.dashboardEvent,
+                    relationship: rsvpChoice === 'no' ? 'invited' : 'joined',
+                  }
+                : current.dashboardEvent,
+            }
+          : current,
+      );
+      setRsvpFeedback({
+        tone: 'success',
+        message: rsvpChoice === 'yes' ? "You're on the list." : 'RSVP saved.',
+      });
+
+      if (rsvpChoice === 'yes') {
+        setRsvpCelebrating(true);
+        window.setTimeout(() => setRsvpCelebrating(false), 1400);
+      }
+    } catch (error) {
+      setRsvpFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error ? error.message : 'We could not save that RSVP.',
+      });
+    } finally {
+      setRsvpSaving(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
@@ -325,12 +396,14 @@ export function EventDetailPage() {
         </article>
 
         <aside className="space-y-5">
-          <Link
-            className="flex min-h-12 items-center justify-center rounded-lg border-4 border-ink bg-sunny px-5 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
-            to={`/events/${detail.event.id}/edit`}
-          >
-            Edit event
-          </Link>
+          {isOrganizer ? (
+            <Link
+              className="flex min-h-12 items-center justify-center rounded-lg border-4 border-ink bg-sunny px-5 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
+              to={`/events/${detail.event.id}/edit`}
+            >
+              Edit event
+            </Link>
+          ) : null}
           <section className="rounded-lg border-4 border-ink bg-paper p-5 shadow-sticker">
             <p className="text-sm font-black uppercase text-coral">When</p>
             <h3 className="mt-2 text-2xl font-black leading-tight">
@@ -356,17 +429,18 @@ export function EventDetailPage() {
               onSend={() => void sendInvites()}
             />
           ) : (
-            <section className="rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
-              <p className="text-sm font-black uppercase text-teal">RSVPs</p>
-              <ul className="mt-4 space-y-3">
-                <li className="flex items-center justify-between gap-3 rounded-lg border-2 border-ink bg-mint px-3 py-2">
-                  <span className="font-black">{displayName}</span>
-                  <span className="rounded-lg bg-white px-3 py-1 text-sm font-black">
-                    {relationship}
-                  </span>
-                </li>
-              </ul>
-            </section>
+            <MemberRsvpPanel
+              choice={rsvpChoice}
+              displayName={displayName}
+              feedback={rsvpFeedback}
+              isCelebrating={rsvpCelebrating}
+              isSaving={rsvpSaving}
+              note={rsvpNote}
+              onChoiceChange={setRsvpChoice}
+              onNoteChange={setRsvpNote}
+              onSave={() => void saveRsvp()}
+              relationship={relationship}
+            />
           )}
         </aside>
       </div>
@@ -456,6 +530,8 @@ export function EventDetailPage() {
           ))}
         </div>
       </section>
+
+      <SocialAttendeeList attendees={socialAttendees} counts={attendeeCounts} />
     </section>
   );
 }
@@ -623,6 +699,163 @@ function OrganizerInvitePanel({
   );
 }
 
+function MemberRsvpPanel({
+  choice,
+  displayName,
+  feedback,
+  isCelebrating,
+  isSaving,
+  note,
+  onChoiceChange,
+  onNoteChange,
+  onSave,
+  relationship,
+}: {
+  choice: EventRsvpUpdateRequest['response'];
+  displayName: string;
+  feedback: RsvpFeedback;
+  isCelebrating: boolean;
+  isSaving: boolean;
+  note: string;
+  onChoiceChange: (value: EventRsvpUpdateRequest['response']) => void;
+  onNoteChange: (value: string) => void;
+  onSave: () => void;
+  relationship: string;
+}) {
+  return (
+    <section className="relative overflow-hidden rounded-lg border-4 border-ink bg-white p-5 shadow-sticker">
+      {isCelebrating ? (
+        <div className="pointer-events-none absolute right-4 top-4 animate-bounce rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
+          You&apos;re in!
+        </div>
+      ) : null}
+
+      <p className="text-sm font-black uppercase text-teal">Your RSVP</p>
+      <h3 className="mt-1 text-2xl font-black">{displayName}</h3>
+      <p className="mt-1 text-sm font-bold text-slate-600">{relationship}</p>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {[
+          ['yes', 'Going', 'bg-mint'],
+          ['maybe', 'Maybe', 'bg-sunny'],
+          ['no', 'No', 'bg-coral text-white'],
+        ].map(([value, label, activeClass]) => {
+          const active = choice === value;
+
+          return (
+            <button
+              className={`min-h-12 rounded-lg border-2 border-ink px-2 py-2 text-sm font-black shadow-sticker transition hover:-translate-y-0.5 ${
+                active ? activeClass : 'bg-paper'
+              }`}
+              key={value}
+              onClick={() =>
+                onChoiceChange(value as EventRsvpUpdateRequest['response'])
+              }
+              type="button"
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="mt-4 block">
+        <span className="text-sm font-black uppercase text-slate-600">
+          Note
+        </span>
+        <textarea
+          className="mt-2 min-h-20 w-full rounded-lg border-2 border-ink bg-paper px-3 py-2 outline-none focus:bg-white"
+          maxLength={1000}
+          onChange={(event) => onNoteChange(event.target.value)}
+          placeholder="See you there."
+          value={note}
+        />
+      </label>
+
+      <button
+        className="mt-3 flex min-h-11 w-full items-center justify-center rounded-lg border-2 border-ink bg-teal px-4 py-2 font-black text-white shadow-sticker transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
+        disabled={isSaving}
+        onClick={onSave}
+        type="button"
+      >
+        {isSaving ? 'Saving' : 'Save RSVP'}
+      </button>
+
+      {feedback ? (
+        <div
+          className={`mt-4 rounded-lg border-2 border-ink p-3 font-black ${
+            feedback.tone === 'success' ? 'bg-mint' : 'bg-coral text-white'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function SocialAttendeeList({
+  attendees,
+  counts,
+}: {
+  attendees: EventAttendee[];
+  counts: Record<string, number>;
+}) {
+  return (
+    <section className="rounded-lg border-4 border-ink bg-paper p-6 shadow-sticker">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-black uppercase text-coral">
+            Who&apos;s coming
+          </p>
+          <h3 className="mt-1 text-3xl font-black">
+            {(counts.accepted ?? 0) + (counts.invited ?? 0)} people in the mix
+          </h3>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-white px-3 py-2 text-sm font-black shadow-sticker">
+          {counts.accepted ?? 0} going
+        </div>
+      </div>
+
+      {attendees.length > 0 ? (
+        <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {attendees.map((attendee) => (
+            <li
+              className="flex min-w-0 items-center gap-3 rounded-lg border-2 border-ink bg-white p-3"
+              key={attendee.invitation_id}
+            >
+              {attendee.picture_url ? (
+                <img
+                  alt=""
+                  className="size-12 shrink-0 rounded-lg border-2 border-ink object-cover"
+                  src={attendee.picture_url}
+                />
+              ) : (
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-lg border-2 border-ink bg-mint text-lg font-black">
+                  {attendeeName(attendee).slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-black">{attendeeName(attendee)}</p>
+                <p className="text-sm font-bold text-slate-600">
+                  {attendeeStatusLabel(attendee)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="mt-5 rounded-lg border-2 border-ink bg-white p-4">
+          <p className="font-black">No confirmed guests yet</p>
+          <p className="mt-1 text-slate-700">
+            RSVP updates will turn this into a friendly roll call.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function relationshipLabel(relationship: string) {
   switch (relationship) {
     case 'organizer':
@@ -705,6 +938,56 @@ function countAttendeeStatuses(attendees: EventAttendee[]) {
       (counts[attendee.invitation_status] ?? 0) + 1;
     return counts;
   }, {});
+}
+
+function findCurrentAttendee(
+  attendees: EventAttendee[],
+  userSub: string,
+  userEmail: string,
+) {
+  return (
+    attendees.find((attendee) => attendee.invitee_sub === userSub) ??
+    attendees.find((attendee) =>
+      attendee.invitee_email?.toLowerCase() === userEmail.toLowerCase()
+    ) ??
+    null
+  );
+}
+
+function toRsvpChoice(
+  attendee: EventAttendee,
+): EventRsvpUpdateRequest['response'] {
+  if (
+    attendee.rsvp_response === 'yes' ||
+    attendee.rsvp_response === 'no' ||
+    attendee.rsvp_response === 'maybe'
+  ) {
+    return attendee.rsvp_response;
+  }
+
+  if (attendee.invitation_status === 'accepted') {
+    return 'yes';
+  }
+
+  if (attendee.invitation_status === 'declined') {
+    return 'no';
+  }
+
+  return 'maybe';
+}
+
+function socialAttendeeList(attendees: EventAttendee[]) {
+  return attendees.filter((attendee) => {
+    if (attendee.rsvp_response === 'no') {
+      return false;
+    }
+
+    if (attendee.rsvp_response === 'yes' || attendee.rsvp_response === 'maybe') {
+      return true;
+    }
+
+    return attendee.invitation_status === 'accepted';
+  });
 }
 
 function attendeeName(attendee: EventAttendee) {

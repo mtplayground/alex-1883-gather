@@ -201,6 +201,29 @@ export type EventAttendeeListResponse = {
   attendees: EventAttendee[];
 };
 
+export type EventRsvpUpdateRequest = {
+  response: 'yes' | 'no' | 'maybe';
+  note?: string | null;
+};
+
+export type EventRsvpRecord = {
+  id: string;
+  invitation_id: string;
+  event_id: string;
+  user_sub: string;
+  response: string;
+  note: string | null;
+  responded_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RsvpActionResponse = {
+  invitation: EventInvitationRecord;
+  rsvp: EventRsvpRecord;
+  email_delivery: InvitationEmailDelivery;
+};
+
 class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -337,6 +360,13 @@ class ApiClient {
   eventAttendees(eventId: string) {
     return this.get<EventAttendeeListResponse>(
       `/api/events/${encodeURIComponent(eventId)}/attendees`,
+    );
+  }
+
+  updateEventRsvp(eventId: string, update: EventRsvpUpdateRequest) {
+    return this.put<RsvpActionResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/rsvp`,
+      update,
     );
   }
 
