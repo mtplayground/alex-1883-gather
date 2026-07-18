@@ -37,6 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         db_pool,
         email,
+        self_url: config.server.self_url.clone(),
         storage,
         users,
     };

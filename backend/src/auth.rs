@@ -2,10 +2,10 @@ use std::{error::Error, fmt};
 
 use axum::{
     body::Body,
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::{header, HeaderMap, Request},
     middleware::Next,
-    response::Response,
+    response::{Redirect, Response},
     Json,
 };
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
@@ -89,6 +89,7 @@ pub enum AuthError {
     UnsupportedKeyType(String),
     JwksRequest(reqwest::Error),
     Token(jsonwebtoken::errors::Error),
+    Url(url::ParseError),
 }
 
 impl AuthVerifier {
@@ -104,6 +105,19 @@ impl AuthVerifier {
     pub async fn verify_cookie(&self, headers: &HeaderMap) -> Result<VerifiedIdentity, AuthError> {
         let token = read_cookie(headers, "mctai_session").ok_or(AuthError::MissingToken)?;
         self.verify_token(&token).await
+    }
+
+    pub fn login_url(&self, return_to: &str) -> Result<String, AuthError> {
+        let mut login_url =
+            url::Url::parse(&format!("{}/login", self.issuer.trim_end_matches('/')))
+                .map_err(AuthError::Url)?;
+
+        login_url
+            .query_pairs_mut()
+            .append_pair("app_token", &self.audience)
+            .append_pair("return_to", return_to);
+
+        Ok(login_url.to_string())
     }
 
     async fn verify_token(&self, token: &str) -> Result<VerifiedIdentity, AuthError> {
@@ -186,6 +200,42 @@ pub async fn me(user: Option<Extension<CurrentUser>>) -> ApiResult<Json<CurrentU
     };
 
     Ok(Json(user))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct LoginRequest {
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct LoginResponse {
+    pub login_url: String,
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    Query(query): Query<LoginRequest>,
+) -> ApiResult<Redirect> {
+    let return_to = frontend_return_to(&state.self_url, query.return_to.as_deref())?;
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+
+    Ok(Redirect::to(&login_url))
+}
+
+pub async fn login_link(
+    State(state): State<AppState>,
+    Json(request): Json<LoginRequest>,
+) -> ApiResult<Json<LoginResponse>> {
+    let return_to = frontend_return_to(&state.self_url, request.return_to.as_deref())?;
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(LoginResponse { login_url }))
 }
 
 pub async fn register(
@@ -304,6 +354,30 @@ fn display_name(user: &CurrentUser) -> Option<&str> {
         .or_else(|| user.email.split('@').next())
 }
 
+fn frontend_return_to(self_url: &str, requested: Option<&str>) -> ApiResult<String> {
+    let base = url::Url::parse(self_url).map_err(ApiError::internal)?;
+    let requested = requested.unwrap_or("/dashboard").trim();
+    let return_to = if requested.starts_with('/') {
+        base.join(requested).map_err(ApiError::internal)?
+    } else {
+        url::Url::parse(requested).map_err(|_| {
+            ApiError::bad_request("invalid_return_to", "return_to must be a frontend URL")
+        })?
+    };
+
+    if return_to.origin() != base.origin()
+        || return_to.path() == "/api"
+        || return_to.path().starts_with("/api/")
+    {
+        return Err(ApiError::bad_request(
+            "invalid_return_to",
+            "return_to must point to a user-visible frontend page",
+        ));
+    }
+
+    Ok(return_to.to_string())
+}
+
 impl fmt::Display for AuthError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -313,6 +387,7 @@ impl fmt::Display for AuthError {
             Self::UnsupportedKeyType(kty) => write!(formatter, "unsupported JWKS key type {kty}"),
             Self::JwksRequest(error) => write!(formatter, "JWKS request failed: {error}"),
             Self::Token(error) => write!(formatter, "session token verification failed: {error}"),
+            Self::Url(error) => write!(formatter, "auth URL construction failed: {error}"),
         }
     }
 }
@@ -333,9 +408,12 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{header, HeaderMap, HeaderValue};
+    use axum::{
+        http::{header, HeaderMap, HeaderValue},
+        response::IntoResponse,
+    };
 
-    use super::{display_name, read_cookie, CurrentUser};
+    use super::{display_name, frontend_return_to, read_cookie, CurrentUser};
 
     #[test]
     fn reads_named_cookie() {
@@ -363,5 +441,19 @@ mod tests {
         };
 
         assert_eq!(display_name(&user), Some("person"));
+    }
+
+    #[test]
+    fn return_to_defaults_to_dashboard() {
+        let return_to = frontend_return_to("https://example.test", None).unwrap();
+
+        assert_eq!(return_to, "https://example.test/dashboard");
+    }
+
+    #[test]
+    fn return_to_rejects_api_paths() {
+        let error = frontend_return_to("https://example.test", Some("/api/me")).unwrap_err();
+
+        assert!(error.into_response().status().is_client_error());
     }
 }
