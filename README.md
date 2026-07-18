@@ -41,3 +41,5 @@ Requests carrying an `mctai_session` cookie are verified against the platform JW
 `GET /api/auth/google` is a Google-login compatibility endpoint that also redirects through the platform auth service. `GET /api/auth/google/callback` does not exchange provider codes; it sends authenticated platform sessions back to a frontend page or restarts platform login when no `mctai_session` is present.
 
 `POST /api/auth/password-reset/request` accepts an email address and sends a warm recovery email through the platform email proxy with a platform sign-in link. `POST /api/auth/password-reset/complete` is a legacy-compatible endpoint that returns the same platform sign-in path; the app does not store reset tokens or change passwords locally.
+
+`GET /api/profile` returns the current user's read-only account settings and editable profile. `PUT /api/profile` updates only the authenticated user's profile fields.
