@@ -13,6 +13,7 @@ use crate::{
     auth::{self, AuthVerifier},
     db,
     email::EmailDispatcher,
+    profile,
     storage::ObjectStorage,
     users::UserRepository,
 };
@@ -64,6 +65,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/verify", get(auth::verify))
         .route("/api/health", get(health))
         .route("/api/me", get(auth::me))
+        .route(
+            "/api/profile",
+            get(profile::get_current_profile).put(profile::update_current_profile),
+        )
         .route("/health", get(health))
         .fallback(not_found)
         .with_state(state)
