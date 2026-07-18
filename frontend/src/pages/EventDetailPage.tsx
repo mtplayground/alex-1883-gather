@@ -6,6 +6,7 @@ import {
   type DashboardEventSummary,
   type EventAttachmentRecord,
   type EventAttendee,
+  type EventCommentRecord,
   type EventRsvpUpdateRequest,
   type EventRecord,
   type InvitationEmailDelivery,
@@ -18,6 +19,7 @@ type EventDetailState =
       event: null;
       attachments: EventAttachmentRecord[];
       attendees: EventAttendee[];
+      comments: EventCommentRecord[];
       dashboardEvent: null;
       error: null;
     }
@@ -26,6 +28,7 @@ type EventDetailState =
       event: EventRecord;
       attachments: EventAttachmentRecord[];
       attendees: EventAttendee[];
+      comments: EventCommentRecord[];
       dashboardEvent: DashboardEventSummary | null;
       error: null;
     }
@@ -34,6 +37,7 @@ type EventDetailState =
       event: null;
       attachments: EventAttachmentRecord[];
       attendees: EventAttendee[];
+      comments: EventCommentRecord[];
       dashboardEvent: null;
       error: string;
     };
@@ -54,6 +58,7 @@ export function EventDetailPage() {
     event: null,
     attachments: [],
     attendees: [],
+    comments: [],
     dashboardEvent: null,
     error: null,
   });
@@ -69,6 +74,12 @@ export function EventDetailPage() {
   const [rsvpSaving, setRsvpSaving] = useState(false);
   const [rsvpFeedback, setRsvpFeedback] = useState<RsvpFeedback>(null);
   const [rsvpCelebrating, setRsvpCelebrating] = useState(false);
+  const [commentBody, setCommentBody] = useState('');
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [celebratedCommentId, setCelebratedCommentId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -84,11 +95,14 @@ export function EventDetailPage() {
 
     async function loadEventDetail() {
       try {
-        const [event, attachmentResponse, dashboardResponse] =
+        const [event, attachmentResponse, dashboardResponse, commentResponse] =
           await Promise.all([
             apiClient.event(currentEventId),
             apiClient.eventAttachments(currentEventId),
             apiClient.dashboardEvents(100).catch(() => ({ events: [] })),
+            apiClient
+              .eventComments(currentEventId)
+              .catch(() => ({ comments: [] })),
           ]);
 
         const attendees = await apiClient
@@ -115,6 +129,7 @@ export function EventDetailPage() {
           event,
           attachments: attachmentResponse.attachments,
           attendees,
+          comments: commentResponse.comments,
           dashboardEvent:
             dashboardResponse.events.find((item) => item.id === event.id) ??
             null,
@@ -130,6 +145,7 @@ export function EventDetailPage() {
           event: null,
           attachments: [],
           attendees: [],
+          comments: [],
           dashboardEvent: null,
           error:
             error instanceof Error
@@ -368,6 +384,45 @@ export function EventDetailPage() {
     }
   }
 
+  async function postComment() {
+    if (detail.status !== 'ready') {
+      return;
+    }
+
+    const body = commentBody.trim();
+
+    if (!body) {
+      setCommentError('Write a quick note first.');
+      return;
+    }
+
+    setCommentSaving(true);
+    setCommentError(null);
+
+    try {
+      const response = await apiClient.createEventComment(detail.event.id, body);
+      setDetail((current) =>
+        current.status === 'ready'
+          ? {
+              ...current,
+              comments: [...current.comments, response.comment],
+            }
+          : current,
+      );
+      setCommentBody('');
+      setCelebratedCommentId(response.comment.id);
+      window.setTimeout(() => setCelebratedCommentId(null), 1400);
+    } catch (error) {
+      setCommentError(
+        error instanceof Error
+          ? error.message
+          : 'We could not post that comment.',
+      );
+    } finally {
+      setCommentSaving(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
@@ -514,22 +569,35 @@ export function EventDetailPage() {
         </section>
       </div>
 
-      <section className="rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
-        <p className="text-sm font-black uppercase text-teal">Activity</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {activityItems.map((item) => (
-            <div
-              className="rounded-lg border-2 border-ink bg-mint p-4"
-              key={item.label}
-            >
-              <p className="text-xs font-black uppercase text-slate-600">
-                {item.label}
-              </p>
-              <p className="mt-2 text-xl font-black">{item.value}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <section className="rounded-lg border-4 border-ink bg-white p-6 shadow-sticker">
+          <p className="text-sm font-black uppercase text-teal">Activity</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-1">
+            {activityItems.map((item) => (
+              <div
+                className="rounded-lg border-2 border-ink bg-mint p-4"
+                key={item.label}
+              >
+                <p className="text-xs font-black uppercase text-slate-600">
+                  {item.label}
+                </p>
+                <p className="mt-2 text-xl font-black">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <CommentThread
+          celebratedCommentId={celebratedCommentId}
+          comments={detail.comments}
+          currentUserSub={auth.user?.sub ?? ''}
+          error={commentError}
+          isSaving={commentSaving}
+          onBodyChange={setCommentBody}
+          onSubmit={() => void postComment()}
+          value={commentBody}
+        />
+      </div>
 
       <SocialAttendeeList attendees={socialAttendees} counts={attendeeCounts} />
     </section>
@@ -794,6 +862,147 @@ function MemberRsvpPanel({
   );
 }
 
+function CommentThread({
+  celebratedCommentId,
+  comments,
+  currentUserSub,
+  error,
+  isSaving,
+  onBodyChange,
+  onSubmit,
+  value,
+}: {
+  celebratedCommentId: string | null;
+  comments: EventCommentRecord[];
+  currentUserSub: string;
+  error: string | null;
+  isSaving: boolean;
+  onBodyChange: (value: string) => void;
+  onSubmit: () => void;
+  value: string;
+}) {
+  return (
+    <section className="relative overflow-hidden rounded-lg border-4 border-ink bg-paper p-5 shadow-sticker">
+      {celebratedCommentId ? (
+        <div className="pointer-events-none absolute right-4 top-4 animate-bounce rounded-lg border-2 border-ink bg-sunny px-3 py-1 text-sm font-black shadow-sticker">
+          New comment
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black uppercase text-coral">Comments</p>
+          <h3 className="mt-1 text-3xl font-black">Event thread</h3>
+        </div>
+        <div className="rounded-lg border-2 border-ink bg-white px-3 py-2 text-sm font-black shadow-sticker">
+          {comments.length} note{comments.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      <div className="mt-5 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+        {comments.length > 0 ? (
+          comments.map((comment) => {
+            const mine = comment.author.sub === currentUserSub;
+            const isFresh = comment.id === celebratedCommentId;
+
+            return (
+              <div
+                className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${
+                  isFresh ? 'animate-pulse' : ''
+                }`}
+                key={comment.id}
+              >
+                {!mine ? <CommentAvatar comment={comment} /> : null}
+                <div
+                  className={`max-w-[min(32rem,82%)] rounded-lg border-2 border-ink px-4 py-3 shadow-sticker ${
+                    mine ? 'bg-teal text-white' : 'bg-white'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <p className="font-black">{commentAuthorName(comment)}</p>
+                    <p
+                      className={`text-xs font-bold ${
+                        mine ? 'text-white/80' : 'text-slate-500'
+                      }`}
+                    >
+                      {formatCommentTime(comment.created_at)}
+                    </p>
+                  </div>
+                  <p className="mt-2 whitespace-pre-line break-words leading-relaxed">
+                    {comment.body}
+                  </p>
+                </div>
+                {mine ? <CommentAvatar comment={comment} /> : null}
+              </div>
+            );
+          })
+        ) : (
+          <div className="rounded-lg border-2 border-ink bg-white p-4">
+            <p className="font-black">No comments yet</p>
+            <p className="mt-1 text-slate-700">
+              Start the thread with a quick update for everyone.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <form
+        className="mt-5 space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <label className="block">
+          <span className="text-sm font-black uppercase text-slate-600">
+            Add a comment
+          </span>
+          <textarea
+            className="mt-2 min-h-24 w-full rounded-lg border-2 border-ink bg-white px-3 py-2 font-bold outline-none focus:bg-mint"
+            maxLength={2000}
+            onChange={(event) => onBodyChange(event.target.value)}
+            placeholder="Drop a detail, question, or quick update."
+            value={value}
+          />
+        </label>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {error ? (
+            <p className="rounded-lg border-2 border-ink bg-coral px-3 py-2 text-sm font-black text-white">
+              {error}
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-slate-600">
+              {value.trim().length}/2000
+            </p>
+          )}
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-ink bg-sunny px-5 py-2 font-black shadow-sticker transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
+            disabled={isSaving}
+            type="submit"
+          >
+            {isSaving ? 'Posting' : 'Post comment'}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function CommentAvatar({ comment }: { comment: EventCommentRecord }) {
+  return comment.author.picture_url ? (
+    <img
+      alt=""
+      className="mt-1 size-11 shrink-0 rounded-lg border-2 border-ink object-cover shadow-sticker"
+      src={comment.author.picture_url}
+    />
+  ) : (
+    <div className="mt-1 flex size-11 shrink-0 items-center justify-center rounded-lg border-2 border-ink bg-mint font-black shadow-sticker">
+      {commentAuthorName(comment).slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
 function SocialAttendeeList({
   attendees,
   counts,
@@ -898,6 +1107,15 @@ function formatShortDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatCommentTime(value: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -995,6 +1213,15 @@ function attendeeName(attendee: EventAttendee) {
     attendee.display_name?.trim() ||
     attendee.invitee_email?.split('@')[0] ||
     attendee.invitee_sub ||
+    'Guest'
+  );
+}
+
+function commentAuthorName(comment: EventCommentRecord) {
+  return (
+    comment.author.name?.trim() ||
+    comment.author.email.split('@')[0] ||
+    comment.author.sub ||
     'Guest'
   );
 }
