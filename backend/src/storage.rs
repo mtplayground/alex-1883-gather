@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{error::Error, io, sync::Arc, time::Duration};
 
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{
@@ -39,12 +39,14 @@ impl ObjectStorage {
             None,
             "object-storage-config",
         ));
-        let s3_config = S3ConfigBuilder::new()
+        let mut s3_config = S3ConfigBuilder::new()
             .region(Region::new(config.region.clone()))
             .credentials_provider(credentials)
-            .endpoint_url(config.endpoint.clone())
-            .force_path_style(true)
-            .build();
+            .force_path_style(true);
+        if !config.endpoint.trim().is_empty() {
+            s3_config = s3_config.endpoint_url(config.endpoint.clone());
+        }
+        let s3_config = s3_config.build();
 
         Self {
             client: Client::from_conf(s3_config),
@@ -55,6 +57,22 @@ impl ObjectStorage {
 
     pub fn bucket(&self) -> &str {
         &self.bucket
+    }
+
+    pub fn is_configured(&self) -> bool {
+        !self.bucket.is_empty()
+    }
+
+    fn ensure_configured(&self) -> StorageResult<()> {
+        if self.is_configured() {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "object storage is not configured for this deployment",
+            )
+            .into())
+        }
     }
 
     pub fn object_key(&self, key: &str) -> String {
@@ -72,6 +90,7 @@ impl ObjectStorage {
         bytes: Vec<u8>,
         content_type: Option<&str>,
     ) -> StorageResult<String> {
+        self.ensure_configured()?;
         let object_key = self.object_key(key);
         let mut request = self
             .client
@@ -89,6 +108,7 @@ impl ObjectStorage {
     }
 
     pub async fn delete_object_key(&self, object_key: &str) -> StorageResult<()> {
+        self.ensure_configured()?;
         self.client
             .delete_object()
             .bucket(self.bucket.as_ref())
@@ -100,6 +120,7 @@ impl ObjectStorage {
     }
 
     pub async fn get_object(&self, key: &str) -> StorageResult<StoredObject> {
+        self.ensure_configured()?;
         let response = self
             .client
             .get_object()
@@ -121,6 +142,7 @@ impl ObjectStorage {
         key: &str,
         expires_in: Duration,
     ) -> StorageResult<String> {
+        self.ensure_configured()?;
         let presigning_config = PresigningConfig::expires_in(expires_in)?;
         let presigned = self
             .client
@@ -138,6 +160,7 @@ impl ObjectStorage {
         object_key: &str,
         expires_in: Duration,
     ) -> StorageResult<String> {
+        self.ensure_configured()?;
         let presigning_config = PresigningConfig::expires_in(expires_in)?;
         let presigned = self
             .client

@@ -61,11 +61,11 @@ impl BackendConfig {
                 url: required_var("DATABASE_URL")?,
             },
             object_storage: ObjectStorageConfig {
-                endpoint: required_url("OBJECT_STORAGE_ENDPOINT")?,
-                region: required_var("OBJECT_STORAGE_REGION")?,
-                bucket: required_var("OBJECT_STORAGE_BUCKET")?,
-                access_key_id: required_var("OBJECT_STORAGE_ACCESS_KEY_ID")?,
-                secret_access_key: required_var("OBJECT_STORAGE_SECRET_ACCESS_KEY")?,
+                endpoint: optional_url("OBJECT_STORAGE_ENDPOINT")?.unwrap_or_default(),
+                region: optional_var("OBJECT_STORAGE_REGION").unwrap_or_else(|| "auto".to_string()),
+                bucket: optional_var("OBJECT_STORAGE_BUCKET").unwrap_or_default(),
+                access_key_id: optional_var("OBJECT_STORAGE_ACCESS_KEY_ID").unwrap_or_default(),
+                secret_access_key: optional_var("OBJECT_STORAGE_SECRET_ACCESS_KEY").unwrap_or_default(),
                 prefix: env::var("OBJECT_STORAGE_PREFIX")
                     .ok()
                     .filter(|value| !value.trim().is_empty())

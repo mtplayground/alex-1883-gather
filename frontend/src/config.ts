@@ -5,7 +5,8 @@ type FrontendConfig = {
   authAppToken: string;
 };
 
-const fallbackApiBaseUrl = 'http://localhost:8080';
+const fallbackApiBaseUrl =
+  globalThis.location?.origin ?? 'http://localhost:8080';
 const fallbackAppBaseUrl =
   globalThis.location?.origin ?? 'http://localhost:5173';
 const fallbackAuthBaseUrl = 'https://auth.mctai.app';

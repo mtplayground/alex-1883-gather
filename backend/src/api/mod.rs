@@ -1,11 +1,12 @@
 pub mod error;
 pub mod validation;
 
-use axum::{extract::State, routing::get, Json, Router};
+use axum::{extract::State, http::Uri, response::Html, routing::get, Json, Router};
 use sqlx::PgPool;
 use tower::ServiceBuilder;
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    services::ServeDir,
     trace::TraceLayer,
 };
 
@@ -136,7 +137,8 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(profile::upload_profile_photo),
         )
         .route("/health", get(health))
-        .fallback(not_found)
+        .nest_service("/assets", ServeDir::new("frontend/dist/assets"))
+        .fallback(static_fallback)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -174,12 +176,25 @@ async fn health(State(state): State<AppState>) -> ApiResult<Json<HealthResponse>
         } else {
             "disabled"
         },
-        object_storage: if state.storage.bucket().is_empty() {
+        object_storage: if !state.storage.is_configured() {
             "missing"
         } else {
             "configured"
         },
     }))
+}
+
+async fn static_fallback(uri: Uri) -> Result<Html<String>, ApiError> {
+    if uri.path().starts_with("/api") {
+        return Err(not_found().await);
+    }
+
+    std::fs::read_to_string("frontend/dist/index.html")
+        .map(Html)
+        .map_err(|error| {
+            tracing::warn!(%error, path = %uri.path(), "frontend asset not found");
+            ApiError::not_found("route_not_found", "route not found")
+        })
 }
 
 async fn not_found() -> ApiError {

@@ -21,6 +21,7 @@ export function App() {
   return (
     <AuthProvider>
       <Router>
+        <MctaiWatermark />
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<Navigate replace to="/dashboard" />} />
@@ -93,4 +94,58 @@ function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   return children;
+}
+
+
+function MctaiWatermark() {
+  const share = async () => {
+    const payload = {
+      title: document.title || 'Ideavibes app',
+      text: 'Built with Ideavibes.ai',
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(window.location.href);
+        const button = document.querySelector<HTMLButtonElement>(
+          '#mctai-watermark [data-mctai-share]',
+        );
+        if (button) {
+          button.textContent = 'Copied';
+          window.setTimeout(() => {
+            button.textContent = 'Share';
+          }, 1600);
+        }
+      }
+    } catch {
+      // Leave the control ready for another attempt.
+    }
+  };
+
+  return (
+    <div
+      id="mctai-watermark"
+      className="fixed bottom-3 left-1/2 z-[2147483647] flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-400/40 bg-slate-900/90 px-3 py-2 text-xs font-semibold leading-none text-slate-50 shadow-2xl backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:translate-x-0"
+    >
+      <a
+        className="text-slate-50 no-underline"
+        href="https://ideavibes.ai"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Built by Ideavibes.ai
+      </a>
+      <button
+        type="button"
+        data-mctai-share
+        className="border-0 border-l border-slate-400/40 bg-transparent py-0 pl-2 pr-0 font-inherit text-sky-300"
+        onClick={share}
+      >
+        Share
+      </button>
+    </div>
+  );
 }
