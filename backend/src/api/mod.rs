@@ -9,12 +9,19 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use crate::{db, email::EmailDispatcher, storage::ObjectStorage, users::UserRepository};
+use crate::{
+    auth::{self, AuthVerifier},
+    db,
+    email::EmailDispatcher,
+    storage::ObjectStorage,
+    users::UserRepository,
+};
 
 use error::{ApiError, ApiResult};
 
 #[derive(Clone)]
 pub struct AppState {
+    pub auth: AuthVerifier,
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
     pub storage: ObjectStorage,
@@ -37,14 +44,21 @@ struct HealthResponse {
 }
 
 pub fn router(state: AppState) -> Router {
+    let auth_state = state.clone();
+
     Router::new()
         .route("/api", get(api_info))
         .route("/api/health", get(health))
+        .route("/api/me", get(auth::me))
         .route("/health", get(health))
         .fallback(not_found)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
+                .layer(axum::middleware::from_fn_with_state(
+                    auth_state,
+                    auth::session_middleware,
+                ))
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(TraceLayer::new_for_http())
                 .layer(PropagateRequestIdLayer::x_request_id()),
