@@ -9,7 +9,7 @@ use tower_http::{
     trace::TraceLayer,
 };
 
-use crate::{db, email::EmailDispatcher, storage::ObjectStorage};
+use crate::{db, email::EmailDispatcher, storage::ObjectStorage, users::UserRepository};
 
 use error::{ApiError, ApiResult};
 
@@ -18,6 +18,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
     pub storage: ObjectStorage,
+    pub users: UserRepository,
 }
 
 #[derive(serde::Serialize)]

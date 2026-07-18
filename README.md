@@ -25,3 +25,7 @@ Configure transactional email with `MCTAI_EMAIL_URL` and `MCTAI_EMAIL_APP_TOKEN`
 ## Backend API
 
 The Axum API shell exposes `/api`, `/health`, and `/api/health`. Feature routes should use the shared `api::error::ApiError` response type and `api::validation` helpers so JSON errors keep the same `{ "error": { "code", "message", "details" } }` shape.
+
+## Backend users
+
+User persistence is keyed by the verified platform auth subject. The `users` table stores identity and email-verification state, `user_identities` records the platform identity linkage, and `profiles` stores display name and profile photo object references for later account flows.
