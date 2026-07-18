@@ -2,6 +2,18 @@
 
 Managed Creator playground.
 
+## Bare deployment
+
+Use [docs/deployment.md](docs/deployment.md) for the self-hosted file/directory deployment procedure, including environment verification, release builds, database migrations, and process startup.
+
+Useful deployment commands:
+
+```bash
+npm run config:check
+npm run build:release
+npm run db:migrate
+```
+
 ## Backend database
 
 Set `DATABASE_URL` before running backend database tasks.
