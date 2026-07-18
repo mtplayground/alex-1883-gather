@@ -773,10 +773,17 @@ pub async fn list_event_attendees(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("event_not_found", "event not found"))?;
 
-    if event.owner_sub != user.sub {
+    let can_read = event.owner_sub == user.sub
+        || state
+            .events
+            .is_invited_member(&event.id, &user.sub)
+            .await
+            .map_err(ApiError::internal)?;
+
+    if !can_read {
         return Err(ApiError::forbidden(
             "event_forbidden",
-            "only the organizer may view event attendees",
+            "you do not have access to this event's attendees",
         ));
     }
 
