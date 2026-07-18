@@ -43,3 +43,5 @@ Requests carrying an `mctai_session` cookie are verified against the platform JW
 `POST /api/auth/password-reset/request` accepts an email address and sends a warm recovery email through the platform email proxy with a platform sign-in link. `POST /api/auth/password-reset/complete` is a legacy-compatible endpoint that returns the same platform sign-in path; the app does not store reset tokens or change passwords locally.
 
 `GET /api/profile` returns the current user's read-only account settings and editable profile. `PUT /api/profile` updates only the authenticated user's profile fields.
+
+`POST /api/profile/photo` accepts a multipart `photo` or `file` image upload, stores it in object storage, replaces the authenticated user's prior profile photo reference, and returns a short-lived access URL.

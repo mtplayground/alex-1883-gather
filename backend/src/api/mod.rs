@@ -69,6 +69,10 @@ pub fn router(state: AppState) -> Router {
             "/api/profile",
             get(profile::get_current_profile).put(profile::update_current_profile),
         )
+        .route(
+            "/api/profile/photo",
+            axum::routing::post(profile::upload_profile_photo),
+        )
         .route("/health", get(health))
         .fallback(not_found)
         .with_state(state)

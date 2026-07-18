@@ -82,6 +82,17 @@ impl ObjectStorage {
         Ok(object_key)
     }
 
+    pub async fn delete_object_key(&self, object_key: &str) -> StorageResult<()> {
+        self.client
+            .delete_object()
+            .bucket(self.bucket.as_ref())
+            .key(object_key)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn get_object(&self, key: &str) -> StorageResult<StoredObject> {
         let response = self
             .client
@@ -110,6 +121,23 @@ impl ObjectStorage {
             .get_object()
             .bucket(self.bucket.as_ref())
             .key(self.object_key(key))
+            .presigned(presigning_config)
+            .await?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    pub async fn presigned_get_url_for_object_key(
+        &self,
+        object_key: &str,
+        expires_in: Duration,
+    ) -> StorageResult<String> {
+        let presigning_config = PresigningConfig::expires_in(expires_in)?;
+        let presigned = self
+            .client
+            .get_object()
+            .bucket(self.bucket.as_ref())
+            .key(object_key)
             .presigned(presigning_config)
             .await?;
 

@@ -163,6 +163,26 @@ impl UserRepository {
         .await
     }
 
+    pub async fn update_profile_photo(
+        &self,
+        sub: &str,
+        photo_object_key: &str,
+    ) -> Result<Profile, sqlx::Error> {
+        sqlx::query_as::<_, Profile>(
+            r#"
+            UPDATE profiles
+            SET photo_object_key = $2,
+                updated_at = NOW()
+            WHERE user_sub = $1
+            RETURNING user_sub, display_name, photo_object_key, bio, created_at, updated_at
+            "#,
+        )
+        .bind(sub)
+        .bind(photo_object_key)
+        .fetch_one(&self.pool)
+        .await
+    }
+
     async fn upsert_identity_link(&self, identity: &VerifiedIdentity) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
