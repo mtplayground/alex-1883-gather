@@ -14,6 +14,7 @@ use crate::{
     db,
     email::EmailDispatcher,
     events::{self, EventRepository},
+    invitations::{self, InvitationRepository},
     profile,
     storage::ObjectStorage,
     users::UserRepository,
@@ -27,6 +28,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
     pub events: EventRepository,
+    pub invitations: InvitationRepository,
     pub self_url: String,
     pub storage: ObjectStorage,
     pub users: UserRepository,
@@ -94,6 +96,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/events/:event_id/attachments/:attachment_id/download",
             get(events::download_event_attachment),
+        )
+        .route(
+            "/api/events/:event_id/invitations",
+            axum::routing::post(invitations::send_event_invitations),
         )
         .route(
             "/api/profile",
