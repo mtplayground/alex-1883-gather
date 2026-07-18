@@ -45,3 +45,7 @@ Requests carrying an `mctai_session` cookie are verified against the platform JW
 `GET /api/profile` returns the current user's read-only account settings and editable profile. `PUT /api/profile` updates only the authenticated user's profile fields.
 
 `POST /api/profile/photo` accepts a multipart `photo` or `file` image upload, stores it in object storage, replaces the authenticated user's prior profile photo reference, and returns a short-lived access URL.
+
+## Backend events
+
+Events are owned by `users.sub`, carry title/description/scheduled time and optional cover-image object references, and support linked PDF attachment records with object-storage metadata.
