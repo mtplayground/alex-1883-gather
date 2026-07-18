@@ -9,6 +9,7 @@ publish.workspace = true
 aws-credential-types = "1"
 aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "migrate"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }

@@ -33,8 +33,8 @@ pub struct ObjectStorageConfig {
 
 #[derive(Clone, Debug)]
 pub struct EmailConfig {
-    pub url: String,
-    pub app_token: String,
+    pub url: Option<String>,
+    pub app_token: Option<String>,
     pub sender_name: String,
 }
 
@@ -72,8 +72,8 @@ impl BackendConfig {
                     .unwrap_or_else(|| "app".to_string()),
             },
             email: EmailConfig {
-                url: required_url("MCTAI_EMAIL_URL")?,
-                app_token: required_var("MCTAI_EMAIL_APP_TOKEN")?,
+                url: optional_url("MCTAI_EMAIL_URL")?,
+                app_token: optional_var("MCTAI_EMAIL_APP_TOKEN"),
                 sender_name: env::var("MCTAI_EMAIL_SENDER_NAME")
                     .ok()
                     .filter(|value| !value.trim().is_empty())
@@ -140,6 +140,22 @@ fn required_url(name: &'static str) -> Result<String, ConfigError> {
     let value = required_var(name)?;
     if value.starts_with("https://") || value.starts_with("http://") {
         Ok(value)
+    } else {
+        Err(ConfigError::InvalidUrl { name, value })
+    }
+}
+
+fn optional_var(name: &'static str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn optional_url(name: &'static str) -> Result<Option<String>, ConfigError> {
+    let Some(value) = optional_var(name) else {
+        return Ok(None);
+    };
+
+    if value.starts_with("https://") || value.starts_with("http://") {
+        Ok(Some(value))
     } else {
         Err(ConfigError::InvalidUrl { name, value })
     }
