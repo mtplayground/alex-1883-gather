@@ -49,3 +49,5 @@ Requests carrying an `mctai_session` cookie are verified against the platform JW
 ## Backend events
 
 Events are owned by `users.sub`, carry title/description/scheduled time and optional cover-image object references, and support linked PDF attachment records with object-storage metadata.
+
+Authenticated organizers can manage events through `GET /api/events`, `POST /api/events`, `GET /api/events/:event_id`, `PUT /api/events/:event_id`, and `DELETE /api/events/:event_id`. Create operations set the current platform-authenticated user as the organizer, and update/delete operations reject non-organizers. Event reads include the organizer plus users listed in `event_members` with `invited` or `accepted` status.

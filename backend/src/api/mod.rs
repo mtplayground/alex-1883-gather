@@ -13,6 +13,7 @@ use crate::{
     auth::{self, AuthVerifier},
     db,
     email::EmailDispatcher,
+    events::{self, EventRepository},
     profile,
     storage::ObjectStorage,
     users::UserRepository,
@@ -25,6 +26,7 @@ pub struct AppState {
     pub auth: AuthVerifier,
     pub db_pool: PgPool,
     pub email: EmailDispatcher,
+    pub events: EventRepository,
     pub self_url: String,
     pub storage: ObjectStorage,
     pub users: UserRepository,
@@ -65,6 +67,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/verify", get(auth::verify))
         .route("/api/health", get(health))
         .route("/api/me", get(auth::me))
+        .route(
+            "/api/events",
+            get(events::list_events).post(events::create_event),
+        )
+        .route(
+            "/api/events/:event_id",
+            get(events::get_event)
+                .put(events::update_event)
+                .delete(events::delete_event),
+        )
         .route(
             "/api/profile",
             get(profile::get_current_profile).put(profile::update_current_profile),

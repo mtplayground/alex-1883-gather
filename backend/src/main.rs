@@ -6,6 +6,7 @@ use alex_1883_gather_backend::{
     config::BackendConfig,
     db,
     email::EmailDispatcher,
+    events::EventRepository,
     storage::ObjectStorage,
     users::UserRepository,
 };
@@ -29,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db::run_migrations(&db_pool).await?;
     db::verify_connection(&db_pool).await?;
     let email = EmailDispatcher::from_config(&config.email);
+    let events = EventRepository::new(db_pool.clone());
     let storage = ObjectStorage::from_config(&config.object_storage);
     let users = UserRepository::new(db_pool.clone());
     let auth = AuthVerifier::from_config(&config.auth);
@@ -37,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         db_pool,
         email,
+        events,
         self_url: config.server.self_url.clone(),
         storage,
         users,
