@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     Extension, Json,
 };
@@ -108,6 +108,45 @@ pub struct EventAttachmentDownloadResponse {
     pub access_url: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct DashboardEventsQuery {
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DashboardEventsResponse {
+    pub events: Vec<DashboardEventSummary>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct DashboardEventSummary {
+    pub id: String,
+    pub owner_sub: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub starts_at: DateTime<Utc>,
+    pub timezone: Option<String>,
+    pub cover_image_object_key: Option<String>,
+    pub cover_image_url: Option<String>,
+    pub relationship: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+pub struct DashboardEventRow {
+    pub id: String,
+    pub owner_sub: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub starts_at: DateTime<Utc>,
+    pub timezone: Option<String>,
+    pub cover_image_object_key: Option<String>,
+    pub relationship: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 impl EventRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -179,6 +218,59 @@ impl EventRepository {
             "#,
         )
         .bind(user_sub)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn upcoming_for_dashboard(
+        &self,
+        user_sub: &str,
+        limit: i64,
+    ) -> Result<Vec<DashboardEventRow>, sqlx::Error> {
+        sqlx::query_as::<_, DashboardEventRow>(
+            r#"
+            SELECT
+                events.id,
+                events.owner_sub,
+                events.title,
+                events.description,
+                events.starts_at,
+                events.timezone,
+                events.cover_image_object_key,
+                CASE
+                    WHEN events.owner_sub = $1 THEN 'organizer'
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM event_members
+                        WHERE
+                            event_members.event_id = events.id
+                            AND event_members.member_sub = $1
+                            AND event_members.status = 'accepted'
+                    ) THEN 'joined'
+                    ELSE 'invited'
+                END AS relationship,
+                events.created_at,
+                events.updated_at
+            FROM events
+            WHERE
+                events.starts_at >= NOW()
+                AND (
+                    events.owner_sub = $1
+                    OR EXISTS (
+                        SELECT 1
+                        FROM event_members
+                        WHERE
+                            event_members.event_id = events.id
+                            AND event_members.member_sub = $1
+                            AND event_members.status IN ('invited', 'accepted')
+                    )
+                )
+            ORDER BY events.starts_at ASC, events.created_at ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(user_sub)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
     }
@@ -437,6 +529,49 @@ pub async fn list_events(
         .map_err(ApiError::internal)?;
 
     Ok(Json(EventListResponse { events }))
+}
+
+pub async fn dashboard_events(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Query(query): Query<DashboardEventsQuery>,
+) -> ApiResult<Json<DashboardEventsResponse>> {
+    let user = require_current_user(user)?;
+    let events = state
+        .events
+        .upcoming_for_dashboard(&user.sub, dashboard_event_limit(query.limit))
+        .await
+        .map_err(ApiError::internal)?;
+    let mut summaries = Vec::with_capacity(events.len());
+
+    for event in events {
+        let cover_image_url = match &event.cover_image_object_key {
+            Some(object_key) => Some(
+                state
+                    .storage
+                    .presigned_get_url_for_object_key(object_key, EVENT_COVER_IMAGE_URL_TTL)
+                    .await
+                    .map_err(ApiError::internal)?,
+            ),
+            None => None,
+        };
+
+        summaries.push(DashboardEventSummary {
+            id: event.id,
+            owner_sub: event.owner_sub,
+            title: event.title,
+            description: event.description,
+            starts_at: event.starts_at,
+            timezone: event.timezone,
+            cover_image_object_key: event.cover_image_object_key,
+            cover_image_url,
+            relationship: event.relationship,
+            created_at: event.created_at,
+            updated_at: event.updated_at,
+        });
+    }
+
+    Ok(Json(DashboardEventsResponse { events: summaries }))
 }
 
 pub async fn create_event(
@@ -873,6 +1008,10 @@ fn event_not_found() -> ApiError {
     ApiError::not_found("event_not_found", "event not found")
 }
 
+fn dashboard_event_limit(limit: Option<i64>) -> i64 {
+    limit.unwrap_or(25).clamp(1, 100)
+}
+
 fn attachment_not_found() -> ApiError {
     ApiError::not_found("attachment_not_found", "attachment not found")
 }
@@ -1062,9 +1201,9 @@ mod tests {
     use crate::auth::CurrentUser;
 
     use super::{
-        event_attachment_key, event_cover_image_key, looks_like_pdf, normalize_pdf_filename,
-        user_can_manage_event, user_owns_event, Event, EventAttachment, EventAttachmentDraft,
-        EventDraft, PDF_CONTENT_TYPE,
+        dashboard_event_limit, event_attachment_key, event_cover_image_key, looks_like_pdf,
+        normalize_pdf_filename, user_can_manage_event, user_owns_event, Event, EventAttachment,
+        EventAttachmentDraft, EventDraft, PDF_CONTENT_TYPE,
     };
 
     #[test]
@@ -1141,6 +1280,13 @@ mod tests {
     fn pdf_header_validation_checks_magic_bytes() {
         assert!(looks_like_pdf(b"%PDF-1.7\n"));
         assert!(!looks_like_pdf(b"not a pdf"));
+    }
+
+    #[test]
+    fn dashboard_limit_uses_safe_bounds() {
+        assert_eq!(dashboard_event_limit(None), 25);
+        assert_eq!(dashboard_event_limit(Some(0)), 1);
+        assert_eq!(dashboard_event_limit(Some(250)), 100);
     }
 
     #[test]
