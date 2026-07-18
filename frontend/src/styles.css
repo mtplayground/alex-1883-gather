@@ -92,6 +92,7 @@ p {
   margin: 0;
   color: #202124;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {

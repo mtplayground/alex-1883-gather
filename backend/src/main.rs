@@ -1,9 +1,13 @@
-use std::{env, net::SocketAddr};
+use std::net::SocketAddr;
 
 use axum::{routing::get, Json, Router};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+mod config;
+
+use config::BackendConfig;
 
 #[derive(serde::Serialize)]
 struct HealthResponse {
@@ -21,16 +25,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = env::var("PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(8080);
-    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let config = BackendConfig::from_env()?;
+    let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
 
     let app = app();
     let listener = TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "backend listening");
+    tracing::info!(
+        %addr,
+        self_url = %config.server.self_url,
+        storage_bucket = %config.object_storage.bucket,
+        "backend listening"
+    );
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -79,4 +84,3 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
-
