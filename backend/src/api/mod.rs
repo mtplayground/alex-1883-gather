@@ -78,6 +78,11 @@ pub fn router(state: AppState) -> Router {
                 .delete(events::delete_event),
         )
         .route(
+            "/api/events/:event_id/cover-image",
+            axum::routing::post(events::upload_event_cover_image)
+                .put(events::upload_event_cover_image),
+        )
+        .route(
             "/api/profile",
             get(profile::get_current_profile).put(profile::update_current_profile),
         )

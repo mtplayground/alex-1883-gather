@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use axum::{
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     Extension, Json,
 };
@@ -14,7 +16,11 @@ use crate::{
         AppState,
     },
     auth::CurrentUser,
+    storage::{safe_key_part, standard_image_type},
 };
+
+const EVENT_COVER_IMAGE_MAX_BYTES: usize = 8 * 1024 * 1024;
+const EVENT_COVER_IMAGE_URL_TTL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug, serde::Serialize, FromRow)]
 pub struct Event {
@@ -72,6 +78,14 @@ pub struct EventRepository {
 #[derive(Debug, serde::Serialize)]
 pub struct EventListResponse {
     pub events: Vec<Event>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EventCoverImageResponse {
+    pub event: Event,
+    pub object_key: String,
+    pub content_type: String,
+    pub access_url: String,
 }
 
 impl EventRepository {
@@ -231,6 +245,36 @@ impl EventRepository {
         .await
     }
 
+    pub async fn update_cover_image(
+        &self,
+        event_id: &str,
+        object_key: &str,
+    ) -> Result<Option<Event>, sqlx::Error> {
+        sqlx::query_as::<_, Event>(
+            r#"
+            UPDATE events
+            SET
+                cover_image_object_key = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING
+                id,
+                owner_sub,
+                title,
+                description,
+                starts_at,
+                timezone,
+                cover_image_object_key,
+                created_at,
+                updated_at
+            "#,
+        )
+        .bind(event_id)
+        .bind(object_key)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn delete(&self, event_id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("DELETE FROM events WHERE id = $1")
             .bind(event_id)
@@ -338,6 +382,71 @@ pub async fn delete_event(
         .map_err(ApiError::internal)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn upload_event_cover_image(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(event_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<EventCoverImageResponse>> {
+    let user = require_current_user(user)?;
+    let existing = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(event_not_found)?;
+    ensure_can_manage_event(&user, &existing)?;
+
+    let upload = read_event_cover_image(&mut multipart).await?;
+    let raw_key = event_cover_image_key(&event_id, upload.extension);
+    let object_key = state
+        .storage
+        .put_object(&raw_key, upload.bytes, Some(upload.content_type))
+        .await
+        .map_err(ApiError::internal)?;
+
+    let event = match state
+        .events
+        .update_cover_image(&event_id, &object_key)
+        .await
+    {
+        Ok(Some(event)) => event,
+        Ok(None) => {
+            if let Err(error) = state.storage.delete_object_key(&object_key).await {
+                tracing::warn!(%error, object_key, "failed to delete orphaned event cover image");
+            }
+            return Err(event_not_found());
+        }
+        Err(error) => {
+            if let Err(delete_error) = state.storage.delete_object_key(&object_key).await {
+                tracing::warn!(%delete_error, object_key, "failed to delete orphaned event cover image");
+            }
+            return Err(ApiError::internal(error));
+        }
+    };
+
+    if let Some(previous_key) = existing.cover_image_object_key {
+        if previous_key != object_key {
+            if let Err(error) = state.storage.delete_object_key(&previous_key).await {
+                tracing::warn!(%error, previous_key, "failed to delete previous event cover image");
+            }
+        }
+    }
+
+    let access_url = state
+        .storage
+        .presigned_get_url_for_object_key(&object_key, EVENT_COVER_IMAGE_URL_TTL)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(EventCoverImageResponse {
+        event,
+        object_key,
+        content_type: upload.content_type.to_string(),
+        access_url,
+    }))
 }
 
 impl ValidateRequest for EventDraft {
@@ -454,6 +563,74 @@ fn event_not_found() -> ApiError {
     ApiError::not_found("event_not_found", "event not found")
 }
 
+struct EventCoverImageUpload {
+    bytes: Vec<u8>,
+    content_type: &'static str,
+    extension: &'static str,
+}
+
+async fn read_event_cover_image(multipart: &mut Multipart) -> ApiResult<EventCoverImageUpload> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| ApiError::bad_request("invalid_upload", "invalid multipart upload"))?
+    {
+        let field_name = field.name().unwrap_or_default().to_string();
+        if field_name != "cover_image" && field_name != "image" && field_name != "file" {
+            continue;
+        }
+
+        let content_type = field
+            .content_type()
+            .and_then(standard_image_type)
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "unsupported_image_type",
+                    "event cover image must be a JPEG, PNG, WebP, or GIF image",
+                )
+            })?;
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|_| ApiError::bad_request("invalid_upload", "invalid image upload"))?
+            .to_vec();
+
+        if bytes.is_empty() {
+            return Err(ApiError::bad_request(
+                "empty_upload",
+                "event cover image must not be empty",
+            ));
+        }
+
+        if bytes.len() > EVENT_COVER_IMAGE_MAX_BYTES {
+            return Err(ApiError::bad_request(
+                "upload_too_large",
+                "event cover image must be 8 MB or smaller",
+            ));
+        }
+
+        return Ok(EventCoverImageUpload {
+            bytes,
+            content_type: content_type.content_type,
+            extension: content_type.extension,
+        });
+    }
+
+    Err(ApiError::bad_request(
+        "missing_cover_image",
+        "multipart upload must include a cover image file",
+    ))
+}
+
+fn event_cover_image_key(event_id: &str, extension: &str) -> String {
+    format!(
+        "events/{}/cover-{}.{}",
+        safe_key_part(event_id),
+        chrono::Utc::now().timestamp_millis(),
+        extension
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
@@ -461,7 +638,10 @@ mod tests {
     use crate::api::validation::ValidateRequest;
     use crate::auth::CurrentUser;
 
-    use super::{user_can_manage_event, user_owns_event, Event, EventAttachmentDraft, EventDraft};
+    use super::{
+        event_cover_image_key, user_can_manage_event, user_owns_event, Event, EventAttachmentDraft,
+        EventDraft,
+    };
 
     #[test]
     fn event_draft_requires_title() {
@@ -506,6 +686,14 @@ mod tests {
 
         assert!(!user_owns_event(&user, &event));
         assert!(!user_can_manage_event(&user, &event));
+    }
+
+    #[test]
+    fn cover_image_key_sanitizes_event_id() {
+        let key = event_cover_image_key("event/../../1", "png");
+
+        assert!(key.starts_with("events/event_______1/cover-"));
+        assert!(key.ends_with(".png"));
     }
 
     fn test_user(sub: &str) -> CurrentUser {

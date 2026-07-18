@@ -12,6 +12,7 @@ use crate::{
         AppState,
     },
     auth::CurrentUser,
+    storage::{safe_key_part, standard_image_type},
     users::{Profile, ProfileUpdate, User, UserRepository},
 };
 
@@ -203,12 +204,15 @@ async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhoto
             continue;
         }
 
-        let content_type = field.content_type().and_then(image_type).ok_or_else(|| {
-            ApiError::bad_request(
-                "unsupported_image_type",
-                "profile photo must be a JPEG, PNG, WebP, or GIF image",
-            )
-        })?;
+        let content_type = field
+            .content_type()
+            .and_then(standard_image_type)
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "unsupported_image_type",
+                    "profile photo must be a JPEG, PNG, WebP, or GIF image",
+                )
+            })?;
         let bytes = field
             .bytes()
             .await
@@ -231,8 +235,8 @@ async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhoto
 
         return Ok(ProfilePhotoUpload {
             bytes,
-            content_type: content_type.0,
-            extension: content_type.1,
+            content_type: content_type.content_type,
+            extension: content_type.extension,
         });
     }
 
@@ -240,16 +244,6 @@ async fn read_profile_photo(multipart: &mut Multipart) -> ApiResult<ProfilePhoto
         "missing_photo",
         "multipart upload must include a photo file",
     ))
-}
-
-fn image_type(content_type: &str) -> Option<(&'static str, &'static str)> {
-    match content_type {
-        "image/jpeg" | "image/jpg" => Some(("image/jpeg", "jpg")),
-        "image/png" => Some(("image/png", "png")),
-        "image/webp" => Some(("image/webp", "webp")),
-        "image/gif" => Some(("image/gif", "gif")),
-        _ => None,
-    }
 }
 
 fn profile_photo_key(sub: &str, extension: &str) -> String {
@@ -261,30 +255,9 @@ fn profile_photo_key(sub: &str, extension: &str) -> String {
     )
 }
 
-fn safe_key_part(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{image_type, safe_key_part};
-
-    #[test]
-    fn image_type_accepts_standard_images() {
-        assert_eq!(image_type("image/jpeg"), Some(("image/jpeg", "jpg")));
-        assert_eq!(image_type("image/png"), Some(("image/png", "png")));
-        assert_eq!(image_type("image/webp"), Some(("image/webp", "webp")));
-        assert_eq!(image_type("image/gif"), Some(("image/gif", "gif")));
-    }
+    use crate::storage::safe_key_part;
 
     #[test]
     fn safe_key_part_replaces_path_separators() {
