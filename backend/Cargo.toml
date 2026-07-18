@@ -6,6 +6,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+aws-credential-types = "1"
+aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "migrate"] }
