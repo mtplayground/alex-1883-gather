@@ -29,3 +29,7 @@ The Axum API shell exposes `/api`, `/health`, and `/api/health`. Feature routes 
 ## Backend users
 
 User persistence is keyed by the verified platform auth subject. The `users` table stores identity and email-verification state, `user_identities` records the platform identity linkage, and `profiles` stores display name and profile photo object references for later account flows.
+
+## Backend auth
+
+Requests carrying an `mctai_session` cookie are verified against the platform JWKS, upserted into the local `users` table, and exposed to handlers through request extensions. The backend does not issue app JWTs or store passwords.

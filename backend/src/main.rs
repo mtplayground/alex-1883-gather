@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use alex_1883_gather_backend::{
     api::{self, AppState},
+    auth::AuthVerifier,
     config::BackendConfig,
     db,
     email::EmailDispatcher,
@@ -30,8 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let email = EmailDispatcher::from_config(&config.email);
     let storage = ObjectStorage::from_config(&config.object_storage);
     let users = UserRepository::new(db_pool.clone());
+    let auth = AuthVerifier::from_config(&config.auth);
 
     let state = AppState {
+        auth,
         db_pool,
         email,
         storage,
