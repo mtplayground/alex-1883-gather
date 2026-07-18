@@ -189,10 +189,10 @@ pub mod templates {
             "You're in - one tiny note"
         };
         let body = if email_verified {
-            format!("Hi {name}, your account is ready. Time to start shaping something fun.")
+            format!("Hi {name}, your account is ready. Time to gather your people.")
         } else {
             format!(
-                "Hi {name}, your account is ready. Your email still needs platform verification, so check the sign-in flow when you have a minute."
+                "Hi {name}, your account is ready. Your email still needs platform verification when you have a minute."
             )
         };
 
@@ -202,7 +202,7 @@ pub mod templates {
     pub fn password_reset_html(login_url: &str) -> String {
         let title = escape_html("Let's get you back in");
         let body = escape_html(
-            "Use the secure platform sign-in link below to continue. If you did not ask for this, you can ignore this email.",
+            "Use the secure platform sign-in link below to hop back in. If you did not ask for this, you can ignore this email.",
         );
         let login_url = escape_html(login_url);
 
@@ -212,7 +212,7 @@ pub mod templates {
   <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
     <h1 style="font-size: 20px;">{title}</h1>
     <p>{body}</p>
-    <p><a href="{login_url}" style="color: #0f766e; font-weight: bold;">Continue to sign in</a></p>
+    <p><a href="{login_url}" style="color: #0f766e; font-weight: bold;">Hop back in</a></p>
   </body>
 </html>"#
         )
@@ -251,11 +251,11 @@ pub mod templates {
             r#"<!doctype html>
 <html>
   <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
-    <h1 style="font-size: 20px;">You're invited to {event_title}</h1>
-    <p>{inviter_name} invited you to join this gathering.</p>
+    <h1 style="font-size: 20px;">You've got a seat at {event_title}</h1>
+    <p>{inviter_name} saved you a spot. Open the invite to peek at the details and RSVP.</p>
     {message_html}
-    <p><a href="{invite_url}" style="color: #0f766e; font-weight: bold;">Accept or decline the invitation</a></p>
-    <p style="color: #6b7280; font-size: 13px;">This link takes you to the event invitation page.</p>
+    <p><a href="{invite_url}" style="color: #0f766e; font-weight: bold;">Open the invite</a></p>
+    <p style="color: #6b7280; font-size: 13px;">You can RSVP, leave a note, and keep the details close by.</p>
   </body>
 </html>"#
         )
@@ -268,7 +268,7 @@ pub mod templates {
         message: Option<&str>,
     ) -> String {
         let mut body = format!(
-            "{inviter_name} invited you to {event_title}.\n\nAccept or decline here: {invite_url}"
+            "{inviter_name} saved you a spot at {event_title}.\n\nOpen the invite and RSVP here: {invite_url}"
         );
 
         if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
@@ -295,10 +295,10 @@ pub mod templates {
             r#"<!doctype html>
 <html>
   <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
-    <h1 style="font-size: 20px;">RSVP received</h1>
-    <p>Your RSVP for {event_title} is now <strong>{response_label}</strong>.</p>
+    <h1 style="font-size: 20px;">RSVP saved</h1>
+    <p>Your RSVP for {event_title} is now <strong>{response_label}</strong>. The guest list is up to date.</p>
     {note_html}
-    <p style="color: #6b7280; font-size: 13px;">You can update your RSVP from the event invitation page.</p>
+    <p style="color: #6b7280; font-size: 13px;">Plans shift. You can update your RSVP from the event invitation page.</p>
   </body>
 </html>"#
         )
@@ -309,7 +309,9 @@ pub mod templates {
         response_label: &str,
         note: Option<&str>,
     ) -> String {
-        let mut body = format!("Your RSVP for {event_title} is now {response_label}.");
+        let mut body = format!(
+            "Your RSVP for {event_title} is now {response_label}. The guest list is up to date."
+        );
 
         if let Some(note) = note.filter(|note| !note.trim().is_empty()) {
             body.push_str("\n\nYour note:\n");
@@ -334,10 +336,10 @@ pub mod templates {
             r#"<!doctype html>
 <html>
   <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
-    <h1 style="font-size: 20px;">Your event is coming up</h1>
-    <p>Hi {recipient_name}, {event_title} is scheduled for {starts_at}.</p>
-    <p><a href="{event_url}" style="color: #0f766e; font-weight: bold;">Open the event details</a></p>
-    <p style="color: #6b7280; font-size: 13px;">A quick reminder so you have the details close by.</p>
+    <h1 style="font-size: 20px;">Almost time for {event_title}</h1>
+    <p>Hi {recipient_name}, {event_title} is on the calendar for {starts_at}.</p>
+    <p><a href="{event_url}" style="color: #0f766e; font-weight: bold;">Open the details</a></p>
+    <p style="color: #6b7280; font-size: 13px;">A quick nudge so the plan stays easy to find.</p>
   </body>
 </html>"#
         )
@@ -350,7 +352,7 @@ pub mod templates {
         event_url: &str,
     ) -> String {
         format!(
-            "Hi {recipient_name}, {event_title} is scheduled for {starts_at}.\n\nOpen the event details: {event_url}"
+            "Hi {recipient_name}, {event_title} is on the calendar for {starts_at}.\n\nOpen the details: {event_url}"
         )
     }
 
@@ -395,6 +397,7 @@ mod tests {
         assert!(html.contains("&lt;Launch&gt;"));
         assert!(html.contains("Alex &amp; Sam"));
         assert!(html.contains("Bring &lt;notes&gt;"));
+        assert!(html.contains("saved you a spot"));
         assert!(html.contains("https://example.com/invite/token"));
     }
 
@@ -403,6 +406,8 @@ mod tests {
         let html = templates::rsvp_confirmation_html("<Launch>", "Yes", Some("See <you> there"));
 
         assert!(html.contains("&lt;Launch&gt;"));
+        assert!(html.contains("RSVP saved"));
+        assert!(html.contains("guest list is up to date"));
         assert!(html.contains("See &lt;you&gt; there"));
     }
 
@@ -417,6 +422,7 @@ mod tests {
 
         assert!(html.contains("&lt;Launch&gt;"));
         assert!(html.contains("Alex &amp; Sam"));
+        assert!(html.contains("Almost time"));
         assert!(html.contains("Jul 18 at &lt;noon&gt;"));
         assert!(html.contains("&lt;y&gt;"));
     }
@@ -427,6 +433,7 @@ mod tests {
 
         assert!(html.contains("You&#39;re in!"));
         assert!(html.contains("Hi Alex"));
+        assert!(html.contains("gather your people"));
     }
 
     #[test]
@@ -434,6 +441,7 @@ mod tests {
         let html = templates::password_reset_html("https://example.test/?next=<dash>");
 
         assert!(html.contains("Let&#39;s get you back in"));
+        assert!(html.contains("Hop back in"));
         assert!(html.contains("&lt;dash&gt;"));
     }
 }

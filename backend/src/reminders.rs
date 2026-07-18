@@ -223,7 +223,7 @@ async fn send_reminder(
         .as_deref()
         .filter(|name| !name.trim().is_empty())
         .unwrap_or("there");
-    let subject = format!("Reminder: {}", candidate.title);
+    let subject = format!("Almost time: {}", candidate.title);
     let html = templates::event_reminder_html(&candidate.title, name, &starts_at, &event_url);
     let text = templates::event_reminder_text(&candidate.title, name, &starts_at, &event_url);
     let message = EmailMessage::new(candidate.recipient_email.clone(), subject)

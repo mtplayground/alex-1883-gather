@@ -1060,7 +1060,7 @@ async fn send_invitation_email(
     invite_url: &str,
     message: Option<&str>,
 ) -> InvitationEmailDelivery {
-    let subject = format!("You're invited: {event_title}");
+    let subject = format!("You've got a seat: {event_title}");
     let html = templates::event_invitation_html(event_title, inviter_name, invite_url, message);
     let text = templates::event_invitation_text(event_title, inviter_name, invite_url, message);
     let email_message = EmailMessage::new(email.to_string(), subject)
@@ -1106,7 +1106,7 @@ async fn send_rsvp_confirmation_email(
     note: Option<&str>,
 ) -> InvitationEmailDelivery {
     let label = rsvp_response_label(response);
-    let subject = format!("RSVP confirmed: {event_title}");
+    let subject = format!("RSVP saved: {event_title}");
     let html = templates::rsvp_confirmation_html(event_title, label, note);
     let text = templates::rsvp_confirmation_text(event_title, label, note);
     let email_message = EmailMessage::new(email.to_string(), subject)
