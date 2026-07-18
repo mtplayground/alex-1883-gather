@@ -80,6 +80,12 @@ export function DashboardPage() {
             Check email verification
           </Link>
         ) : null}
+        <Link
+          className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg border-2 border-ink bg-teal px-4 py-2 font-black text-white shadow-sticker transition hover:-translate-y-0.5"
+          to="/events/new"
+        >
+          Create event
+        </Link>
       </div>
 
       {dashboard.status === 'loading' ? <DashboardLoading /> : null}
