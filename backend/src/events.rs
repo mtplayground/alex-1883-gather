@@ -637,7 +637,7 @@ pub async fn update_event(
 
     if !changed_fields.is_empty() {
         let actor = display_name(&user);
-        let message = format!("{actor} updated the event.");
+        let message = format!("{actor} updated the event details.");
 
         state
             .activity

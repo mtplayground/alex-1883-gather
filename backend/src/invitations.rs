@@ -1030,8 +1030,8 @@ async fn record_rsvp_activity(
     note: Option<&str>,
 ) -> ApiResult<()> {
     let actor = display_name(user);
-    let label = rsvp_response_label(response);
-    let message = format!("{actor} updated their RSVP to {label}.");
+    let phrase = rsvp_activity_phrase(response);
+    let message = format!("{actor} {phrase}.");
 
     state
         .invitations
@@ -1249,13 +1249,22 @@ fn rsvp_response_label(response: &str) -> &'static str {
     }
 }
 
+fn rsvp_activity_phrase(response: &str) -> &'static str {
+    match response {
+        RSVP_YES => "is in",
+        RSVP_NO => "can't make it",
+        RSVP_MAYBE => "might make it",
+        _ => "updated their RSVP",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::api::validation::ValidateRequest;
 
     use super::{
         invitation_response_url, is_invitation_status, is_rsvp_response,
-        member_status_for_invitation_status, response_for_invitation_status,
+        member_status_for_invitation_status, response_for_invitation_status, rsvp_activity_phrase,
         status_for_rsvp_response, EventInvitationDraft, EventInvitationStatusUpdate,
         EventRsvpDraft, EventRsvpUpdateRequest, InvitationRecipient, InvitationResponseRequest,
         SendInvitationsRequest, INVITATION_STATUS_ACCEPTED, INVITATION_STATUS_DECLINED, RSVP_MAYBE,
@@ -1277,6 +1286,13 @@ mod tests {
         assert!(is_rsvp_response("no"));
         assert!(is_rsvp_response("maybe"));
         assert!(!is_rsvp_response("accepted"));
+    }
+
+    #[test]
+    fn rsvp_activity_phrases_read_like_feed_items() {
+        assert_eq!(rsvp_activity_phrase(RSVP_YES), "is in");
+        assert_eq!(rsvp_activity_phrase(RSVP_NO), "can't make it");
+        assert_eq!(rsvp_activity_phrase(RSVP_MAYBE), "might make it");
     }
 
     #[test]

@@ -59,15 +59,37 @@ pub struct EventCommentDraft {
     pub body: String,
 }
 
-#[derive(Clone, Debug, serde::Serialize, FromRow)]
-pub struct EventActivity {
+#[derive(Clone, Debug, FromRow)]
+struct EventActivityRow {
     pub id: String,
     pub event_id: String,
     pub actor_sub: Option<String>,
+    pub actor_email: Option<String>,
+    pub actor_name: Option<String>,
+    pub actor_picture_url: Option<String>,
     pub activity_type: String,
     pub message: String,
     pub payload: Value,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EventActivity {
+    pub id: String,
+    pub event_id: String,
+    pub actor: Option<EventActivityActor>,
+    pub activity_type: String,
+    pub message: String,
+    pub payload: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EventActivityActor {
+    pub sub: String,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub picture_url: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -183,26 +205,42 @@ impl ActivityRepository {
     ) -> Result<EventActivity, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
 
-        sqlx::query_as::<_, EventActivity>(
+        sqlx::query_as::<_, EventActivityRow>(
             r#"
-            INSERT INTO event_activity (
-                id,
-                event_id,
-                actor_sub,
-                activity_type,
-                message,
-                metadata,
-                payload
+            WITH inserted AS (
+                INSERT INTO event_activity (
+                    id,
+                    event_id,
+                    actor_sub,
+                    activity_type,
+                    message,
+                    metadata,
+                    payload
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $6)
+                RETURNING
+                    id,
+                    event_id,
+                    actor_sub,
+                    activity_type,
+                    message,
+                    payload,
+                    created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $6)
-            RETURNING
-                id,
-                event_id,
-                actor_sub,
-                activity_type,
-                message,
-                payload,
-                created_at
+            SELECT
+                inserted.id,
+                inserted.event_id,
+                inserted.actor_sub,
+                users.email AS actor_email,
+                COALESCE(profiles.display_name, users.name) AS actor_name,
+                users.picture_url AS actor_picture_url,
+                inserted.activity_type,
+                inserted.message,
+                inserted.payload,
+                inserted.created_at
+            FROM inserted
+            LEFT JOIN users ON users.sub = inserted.actor_sub
+            LEFT JOIN profiles ON profiles.user_sub = inserted.actor_sub
             "#,
         )
         .bind(id)
@@ -213,30 +251,38 @@ impl ActivityRepository {
         .bind(payload)
         .fetch_one(&self.pool)
         .await
+        .map(EventActivity::from)
     }
 
     pub async fn list_activity(&self, event_id: &str) -> Result<Vec<EventActivity>, sqlx::Error> {
-        sqlx::query_as::<_, EventActivity>(
+        let rows = sqlx::query_as::<_, EventActivityRow>(
             r#"
             SELECT
-                id,
-                event_id,
-                actor_sub,
-                activity_type,
-                message,
+                event_activity.id,
+                event_activity.event_id,
+                event_activity.actor_sub,
+                users.email AS actor_email,
+                COALESCE(profiles.display_name, users.name) AS actor_name,
+                users.picture_url AS actor_picture_url,
+                event_activity.activity_type,
+                event_activity.message,
                 CASE
-                    WHEN payload <> '{}'::jsonb THEN payload
-                    ELSE metadata
+                    WHEN event_activity.payload <> '{}'::jsonb THEN event_activity.payload
+                    ELSE event_activity.metadata
                 END AS payload,
-                created_at
+                event_activity.created_at
             FROM event_activity
-            WHERE event_id = $1
-            ORDER BY created_at DESC, id DESC
+            LEFT JOIN users ON users.sub = event_activity.actor_sub
+            LEFT JOIN profiles ON profiles.user_sub = event_activity.actor_sub
+            WHERE event_activity.event_id = $1
+            ORDER BY event_activity.created_at DESC, event_activity.id DESC
             "#,
         )
         .bind(event_id)
         .fetch_all(&self.pool)
-        .await
+        .await?;
+
+        Ok(rows.into_iter().map(EventActivity::from).collect())
     }
 }
 
@@ -254,6 +300,25 @@ impl From<EventCommentRow> for EventComment {
             body: row.body,
             created_at: row.created_at,
             updated_at: row.updated_at,
+        }
+    }
+}
+
+impl From<EventActivityRow> for EventActivity {
+    fn from(row: EventActivityRow) -> Self {
+        Self {
+            id: row.id,
+            event_id: row.event_id,
+            actor: row.actor_sub.map(|sub| EventActivityActor {
+                sub,
+                email: row.actor_email,
+                name: row.actor_name,
+                picture_url: row.actor_picture_url,
+            }),
+            activity_type: row.activity_type,
+            message: row.message,
+            payload: row.payload,
+            created_at: row.created_at,
         }
     }
 }
@@ -307,7 +372,7 @@ pub async fn create_event_comment(
         .await
         .map_err(ApiError::internal)?;
     let actor = display_name(&user);
-    let message = format!("{actor} commented.");
+    let message = format!("{actor} added a comment.");
 
     state
         .activity
@@ -402,10 +467,14 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use serde_json::json;
 
     use crate::api::validation::ValidateRequest;
 
-    use super::{EventComment, EventCommentDraft, EventCommentRow, ACTIVITY_COMMENT_CREATED};
+    use super::{
+        EventActivity, EventActivityRow, EventComment, EventCommentDraft, EventCommentRow,
+        ACTIVITY_COMMENT_CREATED,
+    };
 
     #[test]
     fn comment_body_must_not_be_blank() {
@@ -444,5 +513,29 @@ mod tests {
             comment.author.picture_url.as_deref(),
             Some("https://example.com/person.png")
         );
+    }
+
+    #[test]
+    fn activity_rows_expose_actor_details() {
+        let row = EventActivityRow {
+            id: "activity-1".to_string(),
+            event_id: "event-1".to_string(),
+            actor_sub: Some("user-1".to_string()),
+            actor_email: Some("person@example.com".to_string()),
+            actor_name: Some("Person".to_string()),
+            actor_picture_url: None,
+            activity_type: ACTIVITY_COMMENT_CREATED.to_string(),
+            message: "Person added a comment.".to_string(),
+            payload: json!({ "comment_id": "comment-1" }),
+            created_at: Utc::now(),
+        };
+
+        let activity = EventActivity::from(row);
+
+        let actor = activity.actor.expect("actor details");
+        assert_eq!(actor.sub, "user-1");
+        assert_eq!(actor.email.as_deref(), Some("person@example.com"));
+        assert_eq!(actor.name.as_deref(), Some("Person"));
+        assert_eq!(activity.message, "Person added a comment.");
     }
 }
