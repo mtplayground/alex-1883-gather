@@ -182,6 +182,23 @@ impl fmt::Display for EmailError {
 impl Error for EmailError {}
 
 pub mod templates {
+    pub fn registration_html(name: &str, email_verified: bool) -> String {
+        let title = if email_verified {
+            "You're in!"
+        } else {
+            "You're in - one tiny note"
+        };
+        let body = if email_verified {
+            format!("Hi {name}, your account is ready. Time to start shaping something fun.")
+        } else {
+            format!(
+                "Hi {name}, your account is ready. Your email still needs platform verification, so check the sign-in flow when you have a minute."
+            )
+        };
+
+        casual_html(title, &body)
+    }
+
     pub fn casual_html(title: &str, body: &str) -> String {
         let title = escape_html(title);
         let body = escape_html(body);
@@ -224,5 +241,13 @@ mod tests {
 
         assert!(html.contains("&lt;Welcome&gt;"));
         assert!(html.contains("One &amp; two"));
+    }
+
+    #[test]
+    fn registration_template_uses_warm_copy() {
+        let html = templates::registration_html("Alex", true);
+
+        assert!(html.contains("You&#39;re in!"));
+        assert!(html.contains("Hi Alex"));
     }
 }

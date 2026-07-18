@@ -16,6 +16,7 @@ use crate::{
         AppState,
     },
     config::AuthConfig,
+    email::{templates, EmailError, EmailMessage},
     users::{RegisteredUser, VerifiedIdentity},
 };
 
@@ -35,6 +36,26 @@ pub struct CurrentUser {
     pub name: Option<String>,
     pub picture_url: Option<String>,
     pub registered: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct AuthActionResponse {
+    pub user: CurrentUser,
+    pub message: String,
+    pub email_delivery: EmailDelivery,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct VerificationStatusResponse {
+    pub verified: bool,
+    pub message: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EmailDelivery {
+    pub status: &'static str,
+    pub id: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -167,6 +188,56 @@ pub async fn me(user: Option<Extension<CurrentUser>>) -> ApiResult<Json<CurrentU
     Ok(Json(user))
 }
 
+pub async fn register(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+) -> ApiResult<Json<AuthActionResponse>> {
+    let Some(Extension(user)) = user else {
+        return Err(ApiError::unauthorized(
+            "not_authenticated",
+            "valid platform session required",
+        ));
+    };
+
+    let email_delivery = send_registration_email(&state, &user).await;
+    let message = if user.registered {
+        display_name(&user)
+            .map(|name| format!("Registration complete. Welcome in, {name}."))
+            .unwrap_or_else(|| "Registration complete. Welcome in.".to_string())
+    } else {
+        display_name(&user)
+            .map(|name| format!("Welcome back, {name}."))
+            .unwrap_or_else(|| "Welcome back.".to_string())
+    };
+
+    Ok(Json(AuthActionResponse {
+        user,
+        message,
+        email_delivery,
+    }))
+}
+
+pub async fn verify(
+    user: Option<Extension<CurrentUser>>,
+) -> ApiResult<Json<VerificationStatusResponse>> {
+    let Some(Extension(user)) = user else {
+        return Err(ApiError::unauthorized(
+            "not_authenticated",
+            "valid platform session required",
+        ));
+    };
+
+    Ok(Json(VerificationStatusResponse {
+        verified: user.email_verified,
+        message: if user.email_verified {
+            "Your email is verified and ready to go.".to_string()
+        } else {
+            "Your session is valid, but the platform has not marked this email verified yet."
+                .to_string()
+        },
+    }))
+}
+
 impl From<RegisteredUser> for CurrentUser {
     fn from(user: RegisteredUser) -> Self {
         Self {
@@ -178,6 +249,59 @@ impl From<RegisteredUser> for CurrentUser {
             registered: user.registered,
         }
     }
+}
+
+async fn send_registration_email(state: &AppState, user: &CurrentUser) -> EmailDelivery {
+    let name = display_name(user).unwrap_or("there");
+    let subject = if user.registered {
+        "Welcome in - your gathering space is ready"
+    } else {
+        "Welcome back - your gathering space is ready"
+    };
+    let html = templates::registration_html(name, user.email_verified);
+    let text = if user.email_verified {
+        format!("Hi {name}, your account is ready.")
+    } else {
+        format!(
+            "Hi {name}, your account is ready. Your email is still pending platform verification."
+        )
+    };
+    let message = EmailMessage::new(user.email.clone(), subject)
+        .html(html)
+        .text(text);
+
+    match state.email.send(message).await {
+        Ok(Some(dispatch)) => EmailDelivery {
+            status: "sent",
+            id: Some(dispatch.id),
+            message: None,
+        },
+        Ok(None) => EmailDelivery {
+            status: "skipped",
+            id: None,
+            message: Some("email proxy is not configured".to_string()),
+        },
+        Err(EmailError::RateLimited) => EmailDelivery {
+            status: "rate_limited",
+            id: None,
+            message: Some("try again shortly".to_string()),
+        },
+        Err(error) => {
+            tracing::error!(%error, "registration email failed");
+            EmailDelivery {
+                status: "failed",
+                id: None,
+                message: Some("registration completed, but email could not be sent".to_string()),
+            }
+        }
+    }
+}
+
+fn display_name(user: &CurrentUser) -> Option<&str> {
+    user.name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| user.email.split('@').next())
 }
 
 impl fmt::Display for AuthError {
@@ -211,7 +335,7 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 mod tests {
     use axum::http::{header, HeaderMap, HeaderValue};
 
-    use super::read_cookie;
+    use super::{display_name, read_cookie, CurrentUser};
 
     #[test]
     fn reads_named_cookie() {
@@ -225,5 +349,19 @@ mod tests {
             read_cookie(&headers, "mctai_session").as_deref(),
             Some("abc.def.ghi")
         );
+    }
+
+    #[test]
+    fn display_name_falls_back_to_email_prefix() {
+        let user = CurrentUser {
+            sub: "user_123".to_string(),
+            email: "person@example.com".to_string(),
+            email_verified: true,
+            name: None,
+            picture_url: None,
+            registered: true,
+        };
+
+        assert_eq!(display_name(&user), Some("person"));
     }
 }

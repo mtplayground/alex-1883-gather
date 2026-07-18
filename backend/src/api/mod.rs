@@ -48,6 +48,8 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/api", get(api_info))
+        .route("/api/auth/register", axum::routing::post(auth::register))
+        .route("/api/auth/verify", get(auth::verify))
         .route("/api/health", get(health))
         .route("/api/me", get(auth::me))
         .route("/health", get(health))
