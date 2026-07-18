@@ -8,8 +8,10 @@
   "scripts": {
     "dev:backend": "cargo run -p alex-1883-gather-backend",
     "dev:frontend": "npm --workspace frontend run dev",
+    "config:check": "cargo run -p alex-1883-gather-backend --bin check_config",
     "db:migrate": "cargo run -p alex-1883-gather-backend --bin migrate",
     "build": "npm --workspace frontend run build && cargo build",
+    "build:release": "npm --workspace frontend run build && cargo build --release",
     "e2e": "playwright test",
     "lint": "npm --workspace frontend run lint && cargo fmt --all --check",
     "format": "prettier --write . && cargo fmt --all"
