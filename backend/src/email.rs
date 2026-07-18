@@ -199,6 +199,25 @@ pub mod templates {
         casual_html(title, &body)
     }
 
+    pub fn password_reset_html(login_url: &str) -> String {
+        let title = escape_html("Let's get you back in");
+        let body = escape_html(
+            "Use the secure platform sign-in link below to continue. If you did not ask for this, you can ignore this email.",
+        );
+        let login_url = escape_html(login_url);
+
+        format!(
+            r#"<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5;">
+    <h1 style="font-size: 20px;">{title}</h1>
+    <p>{body}</p>
+    <p><a href="{login_url}" style="color: #0f766e; font-weight: bold;">Continue to sign in</a></p>
+  </body>
+</html>"#
+        )
+    }
+
     pub fn casual_html(title: &str, body: &str) -> String {
         let title = escape_html(title);
         let body = escape_html(body);
@@ -249,5 +268,13 @@ mod tests {
 
         assert!(html.contains("You&#39;re in!"));
         assert!(html.contains("Hi Alex"));
+    }
+
+    #[test]
+    fn password_reset_template_escapes_link() {
+        let html = templates::password_reset_html("https://example.test/?next=<dash>");
+
+        assert!(html.contains("Let&#39;s get you back in"));
+        assert!(html.contains("&lt;dash&gt;"));
     }
 }

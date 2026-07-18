@@ -13,6 +13,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use crate::{
     api::{
         error::{ApiError, ApiResult},
+        validation::{require_max_len, require_non_empty, ValidateRequest, ValidationErrors},
         AppState,
     },
     config::AuthConfig,
@@ -212,6 +213,26 @@ pub struct LoginResponse {
     pub login_url: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct PasswordResetRequest {
+    pub email: String,
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PasswordResetCompleteRequest {
+    pub token: Option<String>,
+    pub new_password: Option<String>,
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct PasswordResetResponse {
+    pub message: String,
+    pub login_url: String,
+    pub email_delivery: EmailDelivery,
+}
+
 pub async fn login(
     State(state): State<AppState>,
     Query(query): Query<LoginRequest>,
@@ -256,6 +277,50 @@ pub async fn google_callback(
         .map_err(ApiError::internal)?;
 
     Ok(Redirect::to(&login_url))
+}
+
+pub async fn request_password_reset(
+    State(state): State<AppState>,
+    Json(request): Json<PasswordResetRequest>,
+) -> ApiResult<Json<PasswordResetResponse>> {
+    request.validate().map_err(ApiError::validation)?;
+
+    let return_to = frontend_return_to(&state.self_url, request.return_to.as_deref())?;
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+    let email_delivery = send_password_reset_email(&state, &request.email, &login_url).await;
+
+    Ok(Json(PasswordResetResponse {
+        message: "If that email can sign in here, we sent a fresh link to get you back in."
+            .to_string(),
+        login_url,
+        email_delivery,
+    }))
+}
+
+pub async fn complete_password_reset(
+    State(state): State<AppState>,
+    Json(request): Json<PasswordResetCompleteRequest>,
+) -> ApiResult<Json<PasswordResetResponse>> {
+    request.validate().map_err(ApiError::validation)?;
+
+    let return_to = frontend_return_to(&state.self_url, request.return_to.as_deref())?;
+    let login_url = state
+        .auth
+        .login_url(&return_to)
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(PasswordResetResponse {
+        message: "Password changes are handled by the platform sign-in flow. Use this link to continue safely.".to_string(),
+        login_url,
+        email_delivery: EmailDelivery {
+            status: "skipped",
+            id: None,
+            message: Some("no app password is stored or changed".to_string()),
+        },
+    }))
 }
 
 pub async fn register(
@@ -308,6 +373,37 @@ pub async fn verify(
     }))
 }
 
+impl ValidateRequest for PasswordResetRequest {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        validate_email(&mut errors, &self.email);
+        if let Some(return_to) = &self.return_to {
+            require_max_len(&mut errors, "return_to", return_to, 2048);
+        }
+
+        errors.into_result()
+    }
+}
+
+impl ValidateRequest for PasswordResetCompleteRequest {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if let Some(token) = &self.token {
+            require_max_len(&mut errors, "token", token, 2048);
+        }
+        if let Some(new_password) = &self.new_password {
+            require_max_len(&mut errors, "new_password", new_password, 1024);
+        }
+        if let Some(return_to) = &self.return_to {
+            require_max_len(&mut errors, "return_to", return_to, 2048);
+        }
+
+        errors.into_result()
+    }
+}
+
 impl From<RegisteredUser> for CurrentUser {
     fn from(user: RegisteredUser) -> Self {
         Self {
@@ -318,6 +414,18 @@ impl From<RegisteredUser> for CurrentUser {
             picture_url: user.picture_url,
             registered: user.registered,
         }
+    }
+}
+
+fn validate_email(errors: &mut ValidationErrors, email: &str) {
+    require_non_empty(errors, "email", email);
+    require_max_len(errors, "email", email, 320);
+
+    let trimmed = email.trim();
+    if !trimmed.is_empty()
+        && (!trimmed.contains('@') || trimmed.starts_with('@') || trimmed.ends_with('@'))
+    {
+        errors.push("email", "must be a valid email address");
     }
 }
 
@@ -362,6 +470,47 @@ async fn send_registration_email(state: &AppState, user: &CurrentUser) -> EmailD
                 status: "failed",
                 id: None,
                 message: Some("registration completed, but email could not be sent".to_string()),
+            }
+        }
+    }
+}
+
+async fn send_password_reset_email(
+    state: &AppState,
+    email: &str,
+    login_url: &str,
+) -> EmailDelivery {
+    let subject = "Your sign-in link is ready";
+    let html = templates::password_reset_html(login_url);
+    let text = format!(
+        "Use this secure platform sign-in link to get back in: {login_url}\n\nIf you did not ask for this, you can ignore this email."
+    );
+    let message = EmailMessage::new(email.trim().to_string(), subject)
+        .html(html)
+        .text(text);
+
+    match state.email.send(message).await {
+        Ok(Some(dispatch)) => EmailDelivery {
+            status: "sent",
+            id: Some(dispatch.id),
+            message: None,
+        },
+        Ok(None) => EmailDelivery {
+            status: "skipped",
+            id: None,
+            message: Some("email proxy is not configured".to_string()),
+        },
+        Err(EmailError::RateLimited) => EmailDelivery {
+            status: "rate_limited",
+            id: None,
+            message: Some("try again shortly".to_string()),
+        },
+        Err(error) => {
+            tracing::error!(%error, "password reset email failed");
+            EmailDelivery {
+                status: "failed",
+                id: None,
+                message: Some("reset request accepted, but email could not be sent".to_string()),
             }
         }
     }
