@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 
-use alex_1883_gather_backend::{config::BackendConfig, db, storage::ObjectStorage};
+use alex_1883_gather_backend::{
+    config::BackendConfig, db, email::EmailDispatcher, storage::ObjectStorage,
+};
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -10,6 +12,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[derive(Clone)]
 struct AppState {
     db_pool: PgPool,
+    email: EmailDispatcher,
     storage: ObjectStorage,
 }
 
@@ -18,6 +21,7 @@ struct HealthResponse {
     status: &'static str,
     service: &'static str,
     database: &'static str,
+    email: &'static str,
     object_storage: &'static str,
 }
 
@@ -37,13 +41,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_pool = db::connect(&config.database).await?;
     db::run_migrations(&db_pool).await?;
     db::verify_connection(&db_pool).await?;
+    let email = EmailDispatcher::from_config(&config.email);
     let storage = ObjectStorage::from_config(&config.object_storage);
 
-    let app = app(AppState { db_pool, storage });
+    let app = app(AppState {
+        db_pool,
+        email,
+        storage,
+    });
     let listener = TcpListener::bind(addr).await?;
     tracing::info!(
         %addr,
         self_url = %config.server.self_url,
+        email_sender = %config.email.sender_name,
         storage_bucket = %config.object_storage.bucket,
         "backend listening"
     );
@@ -74,6 +84,11 @@ async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, S
         status: "ok",
         service: "backend",
         database: "ok",
+        email: if state.email.is_configured() {
+            "configured"
+        } else {
+            "disabled"
+        },
         object_storage: if state.storage.bucket().is_empty() {
             "missing"
         } else {

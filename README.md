@@ -17,3 +17,7 @@ The backend also runs embedded SQLx migrations on startup and verifies database 
 Configure the S3-compatible storage client with `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY`, and `OBJECT_STORAGE_PREFIX`.
 
 The backend storage module applies the configured prefix, supports object upload/download, and can generate presigned GET URLs for browser access.
+
+## Backend email
+
+Configure transactional email with `MCTAI_EMAIL_URL` and `MCTAI_EMAIL_APP_TOKEN`. The backend email module sends through the platform proxy only, skips sends when the proxy is not configured, and exposes a small template namespace for friendly transactional copy.
