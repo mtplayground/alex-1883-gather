@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import {
-  apiClient,
-  type DashboardEventSummary,
-} from '../api/client';
+import { apiClient, type DashboardEventSummary } from '../api/client';
+import { friendlyErrorMessage } from '../api/errors';
 import { useAuth } from '../auth/useAuth';
 import { EventCard } from '../components/EventCard';
 
@@ -47,10 +45,7 @@ export function DashboardPage() {
         setDashboard({
           status: 'error',
           events: [],
-          error:
-            error instanceof Error
-              ? error.message
-              : 'We could not load your events.',
+          error: friendlyErrorMessage(error, 'dashboard'),
         });
       });
 

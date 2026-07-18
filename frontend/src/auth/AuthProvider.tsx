@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-
 import {
-  ApiError,
-  apiClient,
-  type CurrentUserResponse,
-} from '../api/client';
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+
+import { ApiError, apiClient, type CurrentUserResponse } from '../api/client';
+import { friendlyErrorMessage } from '../api/errors';
 import { AuthContext, type AuthContextValue, type AuthUser } from './context';
 
 function toAuthUser(user: CurrentUserResponse): AuthUser {
@@ -35,7 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus('signed-out');
 
       if (!(sessionError instanceof ApiError && sessionError.status === 401)) {
-        setError('We could not check your session. Try again in a moment.');
+        setError(friendlyErrorMessage(sessionError, 'auth'));
+      } else {
+        setError(null);
       }
     }
   }, []);
@@ -62,8 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setStatus('signed-out');
 
-        if (!(sessionError instanceof ApiError && sessionError.status === 401)) {
-          setError('We could not check your session. Try again in a moment.');
+        if (!(
+          sessionError instanceof ApiError && sessionError.status === 401
+        )) {
+          setError(friendlyErrorMessage(sessionError, 'auth'));
+        } else {
+          setError(null);
         }
       });
 

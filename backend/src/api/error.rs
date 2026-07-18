@@ -39,7 +39,7 @@ impl ApiError {
         Self {
             status: StatusCode::UNPROCESSABLE_ENTITY,
             code: "validation_failed",
-            message: "request validation failed".to_string(),
+            message: "A few details need another look.".to_string(),
             details: Some(errors.into_json()),
         }
     }
@@ -65,7 +65,7 @@ impl ApiError {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
-            "internal server error",
+            "Something tripped on our side. Try again in a moment.",
         )
     }
 
@@ -109,5 +109,23 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
         assert!(body.contains(r#""code":"missing""#));
         assert!(body.contains(r#""message":"not here""#));
+    }
+
+    #[tokio::test]
+    async fn default_messages_are_user_friendly() {
+        let response = ApiError::internal("database went away").into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body.contains("Something tripped on our side"));
+
+        let response =
+            ApiError::validation(crate::api::validation::ValidationErrors::new()).into_response();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("A few details need another look"));
     }
 }

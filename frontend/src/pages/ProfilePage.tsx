@@ -1,14 +1,19 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
-  ApiError,
   apiClient,
   type ProfileRecord,
   type ProfileResponse,
 } from '../api/client';
+import { friendlyErrorMessage } from '../api/errors';
 import { useAuth } from '../auth/useAuth';
 
-const acceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const acceptedImageTypes = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+];
 const maxPhotoBytes = 5 * 1024 * 1024;
 
 export function ProfilePage() {
@@ -48,7 +53,7 @@ export function ProfilePage() {
         }
 
         setLoading(false);
-        setError(readError(profileError));
+        setError(friendlyErrorMessage(profileError, 'profile'));
       });
 
     return () => {
@@ -77,7 +82,7 @@ export function ProfilePage() {
       applyProfile(response);
       setMessage('Profile saved. Looking sharp.');
     } catch (saveError) {
-      setError(readError(saveError));
+      setError(friendlyErrorMessage(saveError, 'profile'));
     } finally {
       setSaving(false);
     }
@@ -111,7 +116,7 @@ export function ProfilePage() {
       setPhotoUrl(response.access_url);
       setMessage('New profile photo is ready.');
     } catch (uploadError) {
-      setError(readError(uploadError));
+      setError(friendlyErrorMessage(uploadError, 'upload'));
     } finally {
       setUploading(false);
     }
@@ -213,7 +218,10 @@ export function ProfilePage() {
               </label>
 
               <div className="grid gap-3 rounded-lg border-2 border-ink bg-mint p-4 sm:grid-cols-2">
-                <AccountLine label="Email" value={auth.user?.email ?? 'Unknown'} />
+                <AccountLine
+                  label="Email"
+                  value={auth.user?.email ?? 'Unknown'}
+                />
                 <AccountLine
                   label="Status"
                   value={auth.user?.emailVerified ? 'Verified' : 'Pending'}
@@ -238,18 +246,6 @@ function AccountLine({ label, value }: { label: string; value: string }) {
       <p className="break-words font-black">{value}</p>
     </div>
   );
-}
-
-function readError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'That did not land. Give it another try.';
 }
 
 const primaryButton =

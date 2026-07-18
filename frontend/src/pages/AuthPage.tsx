@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
+import { friendlyErrorMessage } from '../api/errors';
 import { useAuth } from '../auth/useAuth';
 
 const tabs = [
@@ -34,11 +35,7 @@ export function AuthPage() {
       await action();
       setLocalMessage(success);
     } catch (error) {
-      setLocalError(
-        error instanceof Error
-          ? error.message
-          : 'That did not land. Give it another try.',
-      );
+      setLocalError(friendlyErrorMessage(error, 'auth'));
     } finally {
       setBusy(false);
     }
@@ -223,7 +220,10 @@ export function AuthPage() {
             Enter your email and we will send a friendly recovery note with a
             secure platform sign-in link.
           </p>
-          <form className="mt-5 flex flex-col gap-3" onSubmit={handleResetRequest}>
+          <form
+            className="mt-5 flex flex-col gap-3"
+            onSubmit={handleResetRequest}
+          >
             <label className="text-sm font-black uppercase text-slate-700">
               Email
               <input
