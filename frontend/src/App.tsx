@@ -13,6 +13,7 @@ import { AppShell } from './components/AppShell';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EventDetailPage } from './pages/EventDetailPage';
+import { EventFormPage } from './pages/EventFormPage';
 import { InvitePage } from './pages/InvitePage';
 import { ProfilePage } from './pages/ProfilePage';
 
@@ -28,6 +29,22 @@ export function App() {
               element={
                 <RequireAuth>
                   <DashboardPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/events/new"
+              element={
+                <RequireAuth>
+                  <EventFormPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/events/:eventId/edit"
+              element={
+                <RequireAuth>
+                  <EventFormPage />
                 </RequireAuth>
               }
             />

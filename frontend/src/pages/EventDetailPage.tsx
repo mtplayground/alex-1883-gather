@@ -222,6 +222,12 @@ export function EventDetailPage() {
         </article>
 
         <aside className="space-y-5">
+          <Link
+            className="flex min-h-12 items-center justify-center rounded-lg border-4 border-ink bg-sunny px-5 py-2 font-black shadow-sticker transition hover:-translate-y-0.5"
+            to={`/events/${detail.event.id}/edit`}
+          >
+            Edit event
+          </Link>
           <section className="rounded-lg border-4 border-ink bg-paper p-5 shadow-sticker">
             <p className="text-sm font-black uppercase text-coral">When</p>
             <h3 className="mt-2 text-2xl font-black leading-tight">

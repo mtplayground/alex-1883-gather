@@ -107,6 +107,14 @@ export type EventRecord = {
   updated_at: string;
 };
 
+export type EventDraftRequest = {
+  title: string;
+  description?: string | null;
+  starts_at: string;
+  timezone?: string | null;
+  cover_image_object_key?: string | null;
+};
+
 export type EventAttachmentRecord = {
   id: string;
   event_id: string;
@@ -126,6 +134,18 @@ export type EventAttachmentListResponse = {
 };
 
 export type EventAttachmentDownloadResponse = {
+  attachment: EventAttachmentRecord;
+  access_url: string;
+};
+
+export type EventCoverImageResponse = {
+  event: EventRecord;
+  object_key: string;
+  content_type: string;
+  access_url: string;
+};
+
+export type EventAttachmentUploadResponse = {
   attachment: EventAttachmentRecord;
   access_url: string;
 };
@@ -196,9 +216,40 @@ class ApiClient {
     return this.get<EventRecord>(`/api/events/${encodeURIComponent(eventId)}`);
   }
 
+  createEvent(draft: EventDraftRequest) {
+    return this.post<EventRecord>('/api/events', draft);
+  }
+
+  updateEvent(eventId: string, draft: EventDraftRequest) {
+    return this.put<EventRecord>(
+      `/api/events/${encodeURIComponent(eventId)}`,
+      draft,
+    );
+  }
+
+  uploadEventCoverImage(eventId: string, file: File) {
+    const form = new FormData();
+    form.set('cover_image', file);
+
+    return this.postForm<EventCoverImageResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/cover-image`,
+      form,
+    );
+  }
+
   eventAttachments(eventId: string) {
     return this.get<EventAttachmentListResponse>(
       `/api/events/${encodeURIComponent(eventId)}/attachments`,
+    );
+  }
+
+  uploadEventAttachment(eventId: string, file: File) {
+    const form = new FormData();
+    form.set('attachment', file);
+
+    return this.postForm<EventAttachmentUploadResponse>(
+      `/api/events/${encodeURIComponent(eventId)}/attachments`,
+      form,
     );
   }
 
@@ -207,6 +258,14 @@ class ApiClient {
       `/api/events/${encodeURIComponent(eventId)}/attachments/${encodeURIComponent(
         attachmentId,
       )}/download`,
+    );
+  }
+
+  deleteEventAttachment(eventId: string, attachmentId: string) {
+    return this.delete(
+      `/api/events/${encodeURIComponent(eventId)}/attachments/${encodeURIComponent(
+        attachmentId,
+      )}`,
     );
   }
 
@@ -268,6 +327,18 @@ class ApiClient {
     await this.ensureOk(response);
 
     return response.json() as Promise<T>;
+  }
+
+  private async delete(path: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    await this.ensureOk(response);
   }
 
   private async ensureOk(response: Response) {

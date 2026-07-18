@@ -4,7 +4,7 @@ import { useAuth } from '../auth/useAuth';
 
 const navigation = [
   { to: '/dashboard', label: 'Dashboard', icon: '☀️' },
-  { to: '/events/summer-supper', label: 'Event', icon: '🎈' },
+  { to: '/events/new', label: 'New event', icon: '🎈' },
   { to: '/invite/teal-table', label: 'Invite', icon: '💌' },
   { to: '/profile', label: 'Profile', icon: '🌟' },
   { to: '/auth', label: 'Account', icon: '🔐' },
