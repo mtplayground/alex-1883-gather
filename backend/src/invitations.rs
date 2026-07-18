@@ -4,6 +4,7 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, Utc};
+use serde_json::{json, Value};
 use sqlx::{FromRow, PgPool};
 
 use crate::{
@@ -102,6 +103,52 @@ pub struct InvitationEmailDelivery {
     pub status: &'static str,
     pub id: Option<String>,
     pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct InvitationResponseRequest {
+    pub status: String,
+    pub response: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct EventRsvpUpdateRequest {
+    pub response: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct InvitationDetailsResponse {
+    pub invitation: EventInvitation,
+    pub event: crate::events::Event,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RsvpActionResponse {
+    pub invitation: EventInvitation,
+    pub rsvp: EventRsvp,
+    pub email_delivery: InvitationEmailDelivery,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct EventAttendeeListResponse {
+    pub attendees: Vec<EventAttendee>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, FromRow)]
+pub struct EventAttendee {
+    pub invitation_id: String,
+    pub event_id: String,
+    pub invitee_sub: Option<String>,
+    pub invitee_email: Option<String>,
+    pub display_name: Option<String>,
+    pub picture_url: Option<String>,
+    pub invitation_status: String,
+    pub rsvp_response: Option<String>,
+    pub rsvp_note: Option<String>,
+    pub responded_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone)]
@@ -231,6 +278,191 @@ impl InvitationRepository {
         .bind(invitation_id)
         .bind(status)
         .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn get_by_response_token(
+        &self,
+        response_token: &str,
+    ) -> Result<Option<EventInvitation>, sqlx::Error> {
+        sqlx::query_as::<_, EventInvitation>(
+            r#"
+            SELECT
+                id,
+                event_id,
+                inviter_sub,
+                invitee_sub,
+                invitee_email,
+                response_token,
+                status,
+                message,
+                created_at,
+                updated_at
+            FROM event_invitations
+            WHERE response_token = $1
+            "#,
+        )
+        .bind(response_token)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn find_for_user(
+        &self,
+        event_id: &str,
+        user_sub: &str,
+        user_email: &str,
+    ) -> Result<Option<EventInvitation>, sqlx::Error> {
+        sqlx::query_as::<_, EventInvitation>(
+            r#"
+            SELECT
+                id,
+                event_id,
+                inviter_sub,
+                invitee_sub,
+                invitee_email,
+                response_token,
+                status,
+                message,
+                created_at,
+                updated_at
+            FROM event_invitations
+            WHERE event_id = $1
+                AND (
+                    invitee_sub = $2
+                    OR lower(invitee_email) = lower($3)
+                )
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(event_id)
+        .bind(user_sub)
+        .bind(user_email)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn set_invitation_status_for_user(
+        &self,
+        invitation_id: &str,
+        user_sub: &str,
+        status: &str,
+    ) -> Result<Option<EventInvitation>, sqlx::Error> {
+        sqlx::query_as::<_, EventInvitation>(
+            r#"
+            UPDATE event_invitations
+            SET
+                invitee_sub = COALESCE(invitee_sub, $2),
+                status = $3,
+                updated_at = NOW()
+            WHERE id = $1
+                AND (invitee_sub IS NULL OR invitee_sub = $2)
+            RETURNING
+                id,
+                event_id,
+                inviter_sub,
+                invitee_sub,
+                invitee_email,
+                response_token,
+                status,
+                message,
+                created_at,
+                updated_at
+            "#,
+        )
+        .bind(invitation_id)
+        .bind(user_sub)
+        .bind(status)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn upsert_event_member(
+        &self,
+        event_id: &str,
+        user_sub: &str,
+        status: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO event_members (event_id, member_sub, status)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (event_id, member_sub)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(event_id)
+        .bind(user_sub)
+        .bind(status)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn record_activity(
+        &self,
+        event_id: &str,
+        actor_sub: &str,
+        activity_type: &str,
+        message: &str,
+        metadata: Value,
+    ) -> Result<(), sqlx::Error> {
+        let id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            r#"
+            INSERT INTO event_activity (
+                id,
+                event_id,
+                actor_sub,
+                activity_type,
+                message,
+                metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(id)
+        .bind(event_id)
+        .bind(actor_sub)
+        .bind(activity_type)
+        .bind(message)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn list_attendees(&self, event_id: &str) -> Result<Vec<EventAttendee>, sqlx::Error> {
+        sqlx::query_as::<_, EventAttendee>(
+            r#"
+            SELECT
+                event_invitations.id AS invitation_id,
+                event_invitations.event_id,
+                event_invitations.invitee_sub,
+                event_invitations.invitee_email,
+                COALESCE(profiles.display_name, users.name) AS display_name,
+                users.picture_url,
+                event_invitations.status AS invitation_status,
+                event_rsvps.response AS rsvp_response,
+                event_rsvps.note AS rsvp_note,
+                event_rsvps.responded_at,
+                GREATEST(event_invitations.updated_at, COALESCE(event_rsvps.updated_at, event_invitations.updated_at)) AS updated_at
+            FROM event_invitations
+            LEFT JOIN users ON users.sub = event_invitations.invitee_sub
+            LEFT JOIN profiles ON profiles.user_sub = event_invitations.invitee_sub
+            LEFT JOIN event_rsvps ON event_rsvps.invitation_id = event_invitations.id
+            WHERE event_invitations.event_id = $1
+            ORDER BY
+                event_rsvps.responded_at DESC NULLS LAST,
+                event_invitations.updated_at DESC
+            "#,
+        )
+        .bind(event_id)
+        .fetch_all(&self.pool)
         .await
     }
 
@@ -437,6 +669,126 @@ pub async fn send_event_invitations(
     ))
 }
 
+pub async fn get_invitation_by_token(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(response_token): Path<String>,
+) -> ApiResult<Json<InvitationDetailsResponse>> {
+    let user = require_current_user(user)?;
+    let invitation = state
+        .invitations
+        .get_by_response_token(&response_token)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("invitation_not_found", "invitation not found"))?;
+
+    ensure_invitee_can_use_invitation(&invitation, &user)?;
+
+    let event = state
+        .events
+        .get(&invitation.event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("event_not_found", "event not found"))?;
+
+    Ok(Json(InvitationDetailsResponse { invitation, event }))
+}
+
+pub async fn respond_to_invitation(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(response_token): Path<String>,
+    Json(request): Json<InvitationResponseRequest>,
+) -> ApiResult<Json<RsvpActionResponse>> {
+    let user = require_current_user(user)?;
+    request.validate().map_err(ApiError::validation)?;
+
+    let invitation = state
+        .invitations
+        .get_by_response_token(&response_token)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("invitation_not_found", "invitation not found"))?;
+
+    ensure_invitee_can_use_invitation(&invitation, &user)?;
+    ensure_invitation_active(&invitation)?;
+
+    let response = response_for_invitation_status(&request.status, request.response.as_deref())?;
+
+    complete_rsvp_action(
+        &state,
+        &user,
+        &invitation,
+        &request.status,
+        response,
+        request.note,
+    )
+    .await
+    .map(Json)
+}
+
+pub async fn update_event_rsvp(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(event_id): Path<String>,
+    Json(request): Json<EventRsvpUpdateRequest>,
+) -> ApiResult<Json<RsvpActionResponse>> {
+    let user = require_current_user(user)?;
+    request.validate().map_err(ApiError::validation)?;
+
+    let invitation = state
+        .invitations
+        .find_for_user(&event_id, &user.sub, &user.email)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("invitation_not_found", "invitation not found"))?;
+
+    ensure_invitee_can_use_invitation(&invitation, &user)?;
+    ensure_invitation_active(&invitation)?;
+
+    let invitation_status = status_for_rsvp_response(&request.response);
+
+    complete_rsvp_action(
+        &state,
+        &user,
+        &invitation,
+        invitation_status,
+        &request.response,
+        request.note,
+    )
+    .await
+    .map(Json)
+}
+
+pub async fn list_event_attendees(
+    State(state): State<AppState>,
+    user: Option<Extension<CurrentUser>>,
+    Path(event_id): Path<String>,
+) -> ApiResult<Json<EventAttendeeListResponse>> {
+    let user = require_current_user(user)?;
+    let event = state
+        .events
+        .get(&event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("event_not_found", "event not found"))?;
+
+    if event.owner_sub != user.sub {
+        return Err(ApiError::forbidden(
+            "event_forbidden",
+            "only the organizer may view event attendees",
+        ));
+    }
+
+    let attendees = state
+        .invitations
+        .list_attendees(&event_id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(EventAttendeeListResponse { attendees }))
+}
+
 impl ValidateRequest for EventInvitationDraft {
     fn validate(&self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
@@ -518,6 +870,65 @@ impl ValidateRequest for SendInvitationsRequest {
     }
 }
 
+impl ValidateRequest for InvitationResponseRequest {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if !matches!(
+            self.status.as_str(),
+            INVITATION_STATUS_ACCEPTED | INVITATION_STATUS_DECLINED
+        ) {
+            errors.push("status", "must be accepted or declined");
+        }
+
+        if let Some(response) = &self.response {
+            if !is_rsvp_response(response) {
+                errors.push("response", "must be yes, no, or maybe");
+            }
+        }
+
+        if self.status == INVITATION_STATUS_DECLINED
+            && self
+                .response
+                .as_deref()
+                .is_some_and(|response| response != RSVP_NO)
+        {
+            errors.push("response", "declined invitations must use no");
+        }
+
+        if self.status == INVITATION_STATUS_ACCEPTED
+            && self
+                .response
+                .as_deref()
+                .is_some_and(|response| response == RSVP_NO)
+        {
+            errors.push("response", "accepted invitations must use yes or maybe");
+        }
+
+        if let Some(note) = &self.note {
+            require_max_len(&mut errors, "note", note, 1000);
+        }
+
+        errors.into_result()
+    }
+}
+
+impl ValidateRequest for EventRsvpUpdateRequest {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if !is_rsvp_response(&self.response) {
+            errors.push("response", "must be yes, no, or maybe");
+        }
+
+        if let Some(note) = &self.note {
+            require_max_len(&mut errors, "note", note, 1000);
+        }
+
+        errors.into_result()
+    }
+}
+
 pub fn is_invitation_status(status: &str) -> bool {
     matches!(
         status,
@@ -541,6 +952,92 @@ fn require_current_user(user: Option<Extension<CurrentUser>>) -> ApiResult<Curre
     };
 
     Ok(user)
+}
+
+async fn complete_rsvp_action(
+    state: &AppState,
+    user: &CurrentUser,
+    invitation: &EventInvitation,
+    invitation_status: &str,
+    response: &str,
+    note: Option<String>,
+) -> ApiResult<RsvpActionResponse> {
+    let event = state
+        .events
+        .get(&invitation.event_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("event_not_found", "event not found"))?;
+    let member_status = member_status_for_invitation_status(invitation_status);
+    let note = note
+        .map(|note| note.trim().to_string())
+        .filter(|note| !note.is_empty());
+    let invitation = state
+        .invitations
+        .set_invitation_status_for_user(&invitation.id, &user.sub, invitation_status)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| {
+            ApiError::forbidden("invitation_forbidden", "invitation belongs to another user")
+        })?;
+
+    state
+        .invitations
+        .upsert_event_member(&event.id, &user.sub, member_status)
+        .await
+        .map_err(ApiError::internal)?;
+
+    let rsvp = state
+        .invitations
+        .upsert_rsvp(
+            &user.sub,
+            &EventRsvpDraft {
+                invitation_id: invitation.id.clone(),
+                event_id: event.id.clone(),
+                response: response.to_string(),
+                note: note.clone(),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+
+    record_rsvp_activity(state, user, &event.id, response, note.as_deref()).await?;
+    let email_delivery =
+        send_rsvp_confirmation_email(state, &user.email, &event.title, response, note.as_deref())
+            .await;
+
+    Ok(RsvpActionResponse {
+        invitation,
+        rsvp,
+        email_delivery,
+    })
+}
+
+async fn record_rsvp_activity(
+    state: &AppState,
+    user: &CurrentUser,
+    event_id: &str,
+    response: &str,
+    note: Option<&str>,
+) -> ApiResult<()> {
+    let actor = display_name(user);
+    let label = rsvp_response_label(response);
+    let message = format!("{actor} updated their RSVP to {label}.");
+
+    state
+        .invitations
+        .record_activity(
+            event_id,
+            &user.sub,
+            "rsvp.updated",
+            &message,
+            json!({
+                "response": response,
+                "note": note,
+            }),
+        )
+        .await
+        .map_err(ApiError::internal)
 }
 
 async fn send_invitation_email(
@@ -589,6 +1086,52 @@ async fn send_invitation_email(
     }
 }
 
+async fn send_rsvp_confirmation_email(
+    state: &AppState,
+    email: &str,
+    event_title: &str,
+    response: &str,
+    note: Option<&str>,
+) -> InvitationEmailDelivery {
+    let label = rsvp_response_label(response);
+    let subject = format!("RSVP confirmed: {event_title}");
+    let html = templates::rsvp_confirmation_html(event_title, label, note);
+    let text = templates::rsvp_confirmation_text(event_title, label, note);
+    let email_message = EmailMessage::new(email.to_string(), subject)
+        .html(html)
+        .text(text);
+
+    match state.email.send(email_message).await {
+        Ok(Some(dispatch)) => InvitationEmailDelivery {
+            email: email.to_string(),
+            status: "sent",
+            id: Some(dispatch.id),
+            message: None,
+        },
+        Ok(None) => InvitationEmailDelivery {
+            email: email.to_string(),
+            status: "skipped",
+            id: None,
+            message: Some("email proxy is not configured".to_string()),
+        },
+        Err(EmailError::RateLimited) => InvitationEmailDelivery {
+            email: email.to_string(),
+            status: "rate_limited",
+            id: None,
+            message: Some("try again shortly".to_string()),
+        },
+        Err(error) => {
+            tracing::error!(%error, invitee_email = %email, "rsvp confirmation email failed");
+            InvitationEmailDelivery {
+                email: email.to_string(),
+                status: "failed",
+                id: None,
+                message: Some("rsvp was saved, but email could not be sent".to_string()),
+            }
+        }
+    }
+}
+
 fn display_name(user: &CurrentUser) -> String {
     user.name
         .as_deref()
@@ -622,13 +1165,92 @@ fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
 }
 
+fn ensure_invitee_can_use_invitation(
+    invitation: &EventInvitation,
+    user: &CurrentUser,
+) -> ApiResult<()> {
+    let sub_matches = invitation
+        .invitee_sub
+        .as_deref()
+        .is_some_and(|sub| sub == user.sub);
+    let email_matches = invitation
+        .invitee_email
+        .as_deref()
+        .is_some_and(|email| email.eq_ignore_ascii_case(&user.email));
+
+    if sub_matches || email_matches {
+        return Ok(());
+    }
+
+    Err(ApiError::forbidden(
+        "invitation_forbidden",
+        "invitation belongs to another user",
+    ))
+}
+
+fn ensure_invitation_active(invitation: &EventInvitation) -> ApiResult<()> {
+    if invitation.status == INVITATION_STATUS_CANCELLED {
+        return Err(ApiError::bad_request(
+            "invitation_cancelled",
+            "cancelled invitations cannot be updated",
+        ));
+    }
+
+    Ok(())
+}
+
+fn response_for_invitation_status<'a>(
+    status: &str,
+    response: Option<&'a str>,
+) -> ApiResult<&'a str> {
+    match (status, response) {
+        (INVITATION_STATUS_ACCEPTED, Some(response)) => Ok(response),
+        (INVITATION_STATUS_ACCEPTED, None) => Ok(RSVP_YES),
+        (INVITATION_STATUS_DECLINED, Some(response)) => Ok(response),
+        (INVITATION_STATUS_DECLINED, None) => Ok(RSVP_NO),
+        _ => Err(ApiError::bad_request(
+            "invalid_invitation_status",
+            "status must be accepted or declined",
+        )),
+    }
+}
+
+fn status_for_rsvp_response(response: &str) -> &'static str {
+    if response == RSVP_NO {
+        INVITATION_STATUS_DECLINED
+    } else {
+        INVITATION_STATUS_ACCEPTED
+    }
+}
+
+fn member_status_for_invitation_status(status: &str) -> &'static str {
+    if status == INVITATION_STATUS_DECLINED {
+        "declined"
+    } else {
+        "accepted"
+    }
+}
+
+fn rsvp_response_label(response: &str) -> &'static str {
+    match response {
+        RSVP_YES => "Yes",
+        RSVP_NO => "No",
+        RSVP_MAYBE => "Maybe",
+        _ => "Updated",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::api::validation::ValidateRequest;
 
     use super::{
-        invitation_response_url, is_invitation_status, is_rsvp_response, EventInvitationDraft,
-        EventInvitationStatusUpdate, EventRsvpDraft, InvitationRecipient, SendInvitationsRequest,
+        invitation_response_url, is_invitation_status, is_rsvp_response,
+        member_status_for_invitation_status, response_for_invitation_status,
+        status_for_rsvp_response, EventInvitationDraft, EventInvitationStatusUpdate,
+        EventRsvpDraft, EventRsvpUpdateRequest, InvitationRecipient, InvitationResponseRequest,
+        SendInvitationsRequest, INVITATION_STATUS_ACCEPTED, INVITATION_STATUS_DECLINED, RSVP_MAYBE,
+        RSVP_NO, RSVP_YES,
     };
 
     #[test]
@@ -712,5 +1334,58 @@ mod tests {
             invitation_response_url("https://example.com/", "token-1"),
             "https://example.com/invite/token-1"
         );
+    }
+
+    #[test]
+    fn invitation_response_defaults_rsvp_from_accept_decline() {
+        assert_eq!(
+            response_for_invitation_status(INVITATION_STATUS_ACCEPTED, None).unwrap(),
+            RSVP_YES
+        );
+        assert_eq!(
+            response_for_invitation_status(INVITATION_STATUS_DECLINED, None).unwrap(),
+            RSVP_NO
+        );
+    }
+
+    #[test]
+    fn rsvp_response_maps_to_invitation_and_member_status() {
+        assert_eq!(
+            status_for_rsvp_response(RSVP_YES),
+            INVITATION_STATUS_ACCEPTED
+        );
+        assert_eq!(
+            status_for_rsvp_response(RSVP_MAYBE),
+            INVITATION_STATUS_ACCEPTED
+        );
+        assert_eq!(
+            status_for_rsvp_response(RSVP_NO),
+            INVITATION_STATUS_DECLINED
+        );
+        assert_eq!(
+            member_status_for_invitation_status(INVITATION_STATUS_DECLINED),
+            "declined"
+        );
+    }
+
+    #[test]
+    fn invitation_response_validation_rejects_conflicting_status() {
+        let request = InvitationResponseRequest {
+            status: INVITATION_STATUS_DECLINED.to_string(),
+            response: Some(RSVP_YES.to_string()),
+            note: None,
+        };
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn event_rsvp_update_accepts_maybe() {
+        let request = EventRsvpUpdateRequest {
+            response: RSVP_MAYBE.to_string(),
+            note: Some("Still checking travel.".to_string()),
+        };
+
+        assert!(request.validate().is_ok());
     }
 }

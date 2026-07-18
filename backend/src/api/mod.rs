@@ -102,6 +102,22 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(invitations::send_event_invitations),
         )
         .route(
+            "/api/events/:event_id/attendees",
+            get(invitations::list_event_attendees),
+        )
+        .route(
+            "/api/events/:event_id/rsvp",
+            axum::routing::put(invitations::update_event_rsvp),
+        )
+        .route(
+            "/api/invitations/:response_token",
+            get(invitations::get_invitation_by_token),
+        )
+        .route(
+            "/api/invitations/:response_token/response",
+            axum::routing::post(invitations::respond_to_invitation),
+        )
+        .route(
             "/api/profile",
             get(profile::get_current_profile).put(profile::update_current_profile),
         )
